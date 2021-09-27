@@ -70,7 +70,7 @@ class RealMatrix():
             self.value = value
 
     def transpose(self):
-        out = RealMatrix()
+        out = RealMatrix(self.N)
         out.value = self.value.transpose()
         return out 
 
