@@ -12,9 +12,18 @@ def test_movebackward():
     Grid.movebackward(mu=0)
     assert(np.sum(Grid.coor-np.array([3,0]))<tol)
 
-# Grid = LatticeBase(size=[4,4])
-# Grid.moveforward(mu=1)
-# Grid.moveforward(mu=0)
+def test_idx():
+    Grid = LatticeBase(size=[4,4])
+    Grid.moveforward(mu=1)
+    Grid.moveforward(mu=0)
+    assert(Grid.get_idx(Grid.coor)==5)
 
-# print(Grid.coor)
-# print(Grid.get_idx(Grid.coor))
+
+# Grid = LatticeBase(size=[4,4])
+# RealField = LatticeReal(lattice=Grid)
+# RealField.fill_grid(0)
+# print(RealField.value)
+
+# ComplexField = LatticeComplex(lattice=Grid)
+# ComplexField.fill_grid(1j)
+# print(ComplexField.value)
