@@ -11,3 +11,10 @@ def test_movebackward():
     Grid = LatticeBase(size=[4,4])
     Grid.movebackward(mu=0)
     assert(np.sum(Grid.coor-np.array([3,0]))<tol)
+
+# Grid = LatticeBase(size=[4,4])
+# Grid.moveforward(mu=1)
+# Grid.moveforward(mu=0)
+
+# print(Grid.coor)
+# print(Grid.get_idx(Grid.coor))
