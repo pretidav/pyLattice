@@ -10,8 +10,6 @@ import unittest
 # ComplexLattice
 # RealLatticeMatrix
 # ComplexLatticeMatrix
-# CMatrix
-# SCMatrix 
 # LCMatrix
 # LSCMatrix
 # LatticeCMatrix
@@ -41,7 +39,7 @@ class Real():
 
     def __mul__(self,X):
         out = Real()
-        if isinstance(X, Real) or isinstance(X,Complex):
+        if isinstance(X, (Real,Complex,RealMatrix,ComplexMatrix)):
             out.value = self.value*X.value
         elif isinstance(X, float) or isinstance(X,int) or isinstance(X,complex) : 
             out.value = self.value*X
@@ -49,7 +47,7 @@ class Real():
         
     def __pow__(self,n):
         out = Real()
-        if isinstance(n, float) or isinstance(n, int):
+        if isinstance(n, (float,int)):
             out.value = self.value**n
         else : 
             out.value = self.value**n.value
@@ -83,27 +81,31 @@ class RealMatrix():
    
     def __add__(self,X):
         out = RealMatrix(self.N)
-        if isinstance(X, RealMatrix) or isinstance(X,ComplexMatrix):
+        if isinstance(X, (RealMatrix,ComplexMatrix)):
+            assert(self.value.shape==X.value.shape)
             out.value = self.value + X.value
-        elif isinstance(X, complex) or isinstance(X,Real):
-            print('here')
-            out.value = self.value + X.value
+        return out
+
+    def __sub__(self,X):
+        out = RealMatrix(self.N)
+        if isinstance(X, (RealMatrix,ComplexMatrix)):
+            assert(self.value.shape==X.value.shape)
+            out.value = self.value - X.value
         return out
 
     def __mul__(self,X):
         out = RealMatrix(self.N)
         if isinstance(X, RealMatrix):
+            assert(self.value.shape[1]==X.value.shape[0])
             out.value = np.dot(self.value,X.value)
-        elif isinstance(X, complex) or isinstance(X,Real):
+        elif isinstance(X, (Complex,Real)):
             out.value = self.value*X.value
         return out
-
-
 
 class ComplexMatrix(RealMatrix):
     def __init__(self, N: int):
         super().__init__(N)
-        self.value = np.zeros((N,N),dtype=float)
+        self.value = np.zeros((N,N), dtype=complex)
     
     def re(self):
         out = RealMatrix(self.N)
@@ -114,3 +116,19 @@ class ComplexMatrix(RealMatrix):
         out = RealMatrix(self.N)
         out.value = np.imag(self.value)
         return out
+
+class Link(ComplexMatrix):
+    def __init__(self,N: int, mu:int):
+        super().__init__(N)
+        self.value = np.array([self.value]*mu)
+    
+    def peek_lorentz(self,mu):
+        out = ComplexMatrix()
+        out.value = self.value[mu]
+        return out
+
+    def poke_lorentz(self,mu,m):
+        if isinstance(m,np.ndarray):
+            assert(m.shape==self.value[0].shape)
+            self.value[mu] = m
+       
