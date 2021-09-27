@@ -17,4 +17,4 @@ jobs:
       - name: Run tests linalg
         run: pytest test_linalg.py
       - name: Run tests lattice
-        runL pytest test_lattice.py
+        run: pytest test_lattice.py
