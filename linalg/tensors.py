@@ -1,4 +1,6 @@
 import numpy as np
+import unittest
+
 # Types: 
 # Real     - real number 
 # Complex  - Real,Real
@@ -22,14 +24,24 @@ class Real():
         self.value = value
 
     def __add__(self,X):
-        return self.value + X
+        out = Real()
+        if isinstance(X, Real):
+            out.value = self.value + X.value
+        else : 
+            out.value = self.value + X
+        return out 
 
     def __sub__(self,X):
-        return self.value - X
+        out = Real()
+        if isinstance(X, Real):
+            out.value = self.value - X.value
+        else : 
+            out.value = self.value - X
+        return out 
 
     def __mul__(self,X):
         out = Real()
-        if isinstance(X, Real):
+        if isinstance(X, Real) or isinstance(X,Complex):
             out.value = self.value*X.value
         elif isinstance(X, float) or isinstance(X,int) or isinstance(X,complex) : 
             out.value = self.value*X
@@ -39,6 +51,8 @@ class Real():
         out = Real()
         if isinstance(n, float) or isinstance(n, int):
             out.value = self.value**n
+        else : 
+            out.value = self.value**n.value
         return out
 
     def __str__(self):
@@ -100,13 +114,3 @@ class ComplexMatrix(RealMatrix):
         out = RealMatrix(self.N)
         out.value = np.imag(self.value)
         return out
-
-
-M = RealMatrix(3)
-M.value = np.array([[1,0,2],[0,0,0],[0,0,3]])
-
-
-B = Real(5)
-D = Real(10)
-C = B**2
-print(C.value)
