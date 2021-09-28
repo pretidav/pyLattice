@@ -29,7 +29,6 @@ class LatticeBase():
     
 class LatticeReal():
     def __init__(self,lattice: LatticeBase):
-        super().__init__()
         self.lattice = lattice
         self.fill_grid() 
         self.value = self.get_value()
@@ -44,10 +43,8 @@ class LatticeReal():
     def get_value(self):
         return np.array([a.value for a in self.grid])
 
-
 class LatticeComplex():
     def __init__(self,lattice: LatticeBase):
-        super().__init__()
         self.lattice = lattice
         self.fill_grid()
         self.value = self.get_value()
