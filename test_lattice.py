@@ -69,4 +69,8 @@ def test_complexmatrixfield():
     assert(np.sum((ComplexMatrixField-ComplexMatrixField2).value - np.array([[1-5j,-6+2j],[7-3j,4-8j]]))<tol)
     assert(np.sum((ComplexMatrixField*ComplexMatrixField.inv()).value-2)<tol)
     assert(np.sum((ComplexMatrixField.inv()*r).value-2)<tol)
-#add tests for adj, conj ,im , re 
+    assert(np.sum([np.sum(a-np.array([[0,2],[3,0]])) for a in ComplexMatrixField.im().value])<tol)
+    assert(np.sum([np.sum(a-np.array([[1,0],[0,4]])) for a in ComplexMatrixField.re().value])<tol)
+    assert(np.sum([np.sum(a-np.array([[1,-2j],[-3j,4]])) for a in ComplexMatrixField.conj().value])<tol)
+    assert(np.sum([np.sum(a-np.array([[1,-3j],[-2j,4]])) for a in ComplexMatrixField.conj().value])<tol)
+
