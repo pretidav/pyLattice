@@ -27,6 +27,9 @@ class LatticeBase():
             idx += x[d]
         return idx
     
+    def peek_coordinate(self,grid,idx):
+        return grid[idx]
+        
 class LatticeReal():
     def __init__(self,lattice: LatticeBase):
         self.lattice = lattice

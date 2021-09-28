@@ -185,18 +185,26 @@ class ComplexMatrix(RealMatrix):
             out.value = self.value*X.value
         return out
 
-class Link(ComplexMatrix):
-    def __init__(self,N: int, mu:int):
-        super().__init__(N)
-        self.value = np.array([self.value]*mu)
-    
-    def peek_lorentz(self,mu):
-        out = ComplexMatrix()
-        out.value = self.value[mu]
-        return out
+class VectorReal():
+    def __init__(self, Nd:int, n: float = 0):
+        self.Nd = Nd
+        self.n  = n
+        self.fill_vector()
+        self.value = self.get_value()
 
-    def poke_lorentz(self,mu,m):
-        if isinstance(m,np.ndarray):
-            assert(m.shape==self.value[0].shape)
-            self.value[mu] = m
+    def fill_vector(self, input):
+        if isinstance(input, (float,int)):
+            self.vector = [Real(input)]*self.Nd
+        elif isinstance(input, Real):
+            self.vector = [input]*self.Nd
+        self.value = self.get_value()
+
+    def get_value(self):
+        return np.array([a.value for a in self.vector])
+
+    def peek_component(self,mu):
+        return self.vector[mu]
+
+    def poke_component(self,mu:int , m:Real):
+        self.vector[mu] = m
        
