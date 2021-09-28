@@ -27,7 +27,7 @@ class LatticeBase():
             idx += x[d]
         return idx
     
-    def peek_coordinate(self,grid,idx):
+    def peek_coor(self,grid,idx):
         return grid[idx]
         
 class LatticeReal():
@@ -43,6 +43,18 @@ class LatticeReal():
             self.grid = [Real(n)]*self.lattice.length
         self.value = self.get_value()
     
+    def moveforward(self,mu,step=1): 
+        self.lattice.moveforward(mu=mu,step=1)
+
+    def movebackward(self,mu,step=1): 
+        self.lattice.movebackward(mu=mu,step=1)
+        
+    def get_idx(self,x):
+        return self.lattice.get_idx(x=x)
+
+    def peek_coor(self,idx):
+        return self.lattice.peek_coor(grid=self.grid,idx=idx)
+
     def get_value(self):
         return np.array([a.value for a in self.grid])
 
@@ -59,6 +71,18 @@ class LatticeComplex():
             self.grid = [Complex(n)]*self.lattice.length
         self.value = self.get_value()
 
+    def moveforward(self,mu,step=1): 
+        self.lattice.moveforward(mu=mu,step=1)
+
+    def movebackward(self,mu,step=1): 
+        self.lattice.movebackward(mu=mu,step=1)
+        
+    def get_idx(self,x):
+        return self.lattice.get_idx(x=x)
+
+    def peek_coor(self,idx):
+        return self.lattice.peek_coor(grid=self.grid,idx=idx)
+
     def get_value(self):
         return np.array([a.value for a in self.grid])
         
@@ -73,6 +97,18 @@ class LatticeRealMatrix():
         if isinstance(n,RealMatrix):
             self.grid = [n]*self.lattice.length
         self.value = self.get_value()
+
+    def moveforward(self,mu,step=1): 
+        self.lattice.moveforward(mu=mu,step=1)
+
+    def movebackward(self,mu,step=1): 
+        self.lattice.movebackward(mu=mu,step=1)
+        
+    def get_idx(self,x):
+        return self.lattice.get_idx(x=x)
+
+    def peek_coor(self,idx):
+        return self.lattice.peek_coor(grid=self.grid,idx=idx)
 
     def get_value(self):
         return np.array([a.value for a in self.grid])
@@ -147,6 +183,18 @@ class LatticeComplexMatrix():
         if isinstance(n,ComplexMatrix):
             self.grid = [n]*self.lattice.length
         self.value = self.get_value()
+
+    def moveforward(self,mu,step=1): 
+        self.lattice.moveforward(mu=mu,step=1)
+
+    def movebackward(self,mu,step=1): 
+        self.lattice.movebackward(mu=mu,step=1)
+        
+    def get_idx(self,x):
+        return self.lattice.get_idx(x=x)
+
+    def peek_coor(self,idx):
+        return self.lattice.peek_coor(grid=self.grid,idx=idx)
 
     def get_value(self):
         return np.array([a.value for a in self.grid])

@@ -205,6 +205,35 @@ class VectorReal():
     def peek_component(self,mu):
         return self.vector[mu]
 
-    def poke_component(self,mu:int , m:Real):
-        self.vector[mu] = m
-       
+    def poke_component(self,mu: int, m):
+        if isinstance(m,Real):
+            self.vector[mu] = m
+        elif isinstance(m,(int,float)):
+            self.vector[mu] = Real(m)
+    
+    def __add__(self,X):
+        out = VectorReal(Nd=self.Nd)
+        if isinstance(X, VectorReal):
+            assert(self.value.shape==X.value.shape)
+            out.value = self.value + X.value
+        elif isinstance(X, Real):
+            out.value = self.value + X.value
+        return out
+
+    def __sub__(self,X):
+        out = VectorReal(Nd=self.Nd)
+        if isinstance(X, VectorReal):
+            assert(self.value.shape==X.value.shape)
+            out.value = self.value - X.value
+        elif isinstance(X, Real):
+            out.value = self.value - X.value
+        return out
+
+    def __mul__(self,X):
+        out = RealMatrix(self.N)
+        if isinstance(X, RealMatrix):
+            assert(self.value.shape[1]==X.value.shape[0])
+            out.value = np.dot(self.value,X.value)
+        elif isinstance(X, (Complex,Real)):
+            out.value = self.value*X.value
+        return out
