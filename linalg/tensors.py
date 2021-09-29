@@ -102,12 +102,24 @@ class RealMatrix():
         return out
 
     def __mul__(self,X):
-        out = RealMatrix(self.N)
         if isinstance(X, RealMatrix):
+            out = RealMatrix(self.N)
             assert(self.value.shape[1]==X.value.shape[0])
             out.value = np.dot(self.value,X.value)
-        elif isinstance(X, (Complex,Real)):
+        elif isinstance(X, Real):
+            out = RealMatrix(self.N)
             out.value = self.value*X.value
+        elif isinstance(X, Complex):
+            out = ComplexMatrix(self.N)
+            out.value = self.value*X.value    
+        elif isinstance(X, VectorComplex):
+            out = VectorComplex(Nd=self.N)
+            assert(self.value.shape[1]==X.value.shape[0])
+            out.value = np.dot(self.value,X.value)
+        elif isinstance(X, VectorReal):
+            out = VectorReal(Nd=self.N)
+            assert(self.value.shape[1]==X.value.shape[0])
+            out.value = np.dot(self.value,X.value)
         return out
 
 class Identity(RealMatrix):
@@ -177,12 +189,17 @@ class ComplexMatrix(RealMatrix):
         return out
 
     def __mul__(self,X):
-        out = RealMatrix(self.N)
         if isinstance(X, RealMatrix):
+            out = RealMatrix(self.N)
             assert(self.value.shape[1]==X.value.shape[0])
             out.value = np.dot(self.value,X.value)
         elif isinstance(X, (Complex,Real)):
+            out = RealMatrix(self.N)
             out.value = self.value*X.value
+        elif isinstance(X, VectorComplex):
+            out = VectorComplex(Nd=self.N)
+            assert(self.value.shape[1]==X.value.shape[0])
+            out.value = np.dot(self.value,X.value)
         return out
 
 class VectorReal():
@@ -203,11 +220,6 @@ class VectorReal():
         elif isinstance(m,(int,float)):
             self.value[mu] = m
     
-    def transpose(self):
-        out = VectorReal(Nd=self.Nd)
-        out.value = self.value.transpose()
-        return out 
-
     def __add__(self,X):
         out = VectorReal(Nd=self.Nd)
         if isinstance(X, VectorReal):
@@ -241,5 +253,60 @@ class VectorReal():
             assert(self.value.shape==X.value.shape)
             out.value = np.dot(self.value,X.value)
         elif isinstance(X, Real):
+            out.value = self.value*X.value
+        return out
+
+
+class VectorComplex():
+    def __init__(self, Nd:int = None, value: np.ndarray = None):
+        if Nd!=None: 
+            self.Nd = Nd 
+            self.value = np.array([1j]*self.Nd)
+        else:
+            self.Nd = len(value)
+            self.value = value
+
+    def peek_component(self,mu):
+        return self.value[mu]
+
+    def poke_component(self, mu: int, m):
+        if isinstance(m,Complex):
+            self.value[mu] = m.value
+        elif isinstance(m,(int,float)):
+            self.value[mu] = m
+    
+    def __add__(self,X):
+        out = VectorComplex(Nd=self.Nd)
+        if isinstance(X, VectorComplex):
+            assert(self.value.shape==X.value.shape)
+            out.value = self.value + X.value
+        elif isinstance(X, (Real,Complex)):
+            out.value = self.value + X.value
+        return out
+
+    def __sub__(self,X):
+        out = VectorComplex(Nd=self.Nd)
+        if isinstance(X, VectorComplex):
+            assert(self.value.shape==X.value.shape)
+            out.value = self.value - X.value
+        elif isinstance(X, (Real,Complex)):
+            out.value = self.value - X.value
+        return out
+
+    def __mul__(self,X):
+        out = VectorComplex(Nd=self.Nd)
+        if isinstance(X, VectorComplex):
+            assert(self.value.shape==X.value.shape)
+            out.value = self.value * X.value
+        elif isinstance(X, (Real,Complex)):
+            out.value = self.value * X.value
+        return out
+
+    def dot(self,X):
+        out = VectorComplex(Nd=self.Nd)
+        if isinstance(X, VectorComplex):
+            assert(self.value.shape==X.value.shape)
+            out.value = np.dot(self.value,X.value)
+        elif isinstance(X, (Real,Complex)):
             out.value = self.value*X.value
         return out
