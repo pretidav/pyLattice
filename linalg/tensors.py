@@ -186,35 +186,28 @@ class ComplexMatrix(RealMatrix):
         return out
 
 class VectorReal():
-    def __init__(self, Nd:int, n: float = 0):
-        self.Nd = Nd
-        self.n  = n
-        self.fill_vector()
-        self.value = self.get_value()
-
-    def fill_vector(self, input):
-        if isinstance(input, (float,int)):
-            self.vector = [Real(input)]*self.Nd
-        elif isinstance(input, Real):
-            self.vector = [input]*self.Nd
-        self.value = self.get_value()
-
-    def get_value(self):
-        return np.array([a.value for a in self.vector])
-
-    def update_value(self):
-        for i,v in enumerate(self.vector):
-            v.value = self.value[i]
+    def __init__(self, Nd:int = None, value: np.ndarray = None):
+        if Nd!=None: 
+            self.Nd = Nd 
+            self.value = np.array([0.]*self.Nd)
+        else:
+            self.Nd = len(value)
+            self.value = value
 
     def peek_component(self,mu):
-        return self.vector[mu]
+        return self.value[mu]
 
-    def poke_component(self,mu: int, m):
+    def poke_component(self, mu: int, m):
         if isinstance(m,Real):
-            self.vector[mu] = m
+            self.value[mu] = m.value
         elif isinstance(m,(int,float)):
-            self.vector[mu] = Real(m)
+            self.value[mu] = m
     
+    def transpose(self):
+        out = VectorReal(Nd=self.Nd)
+        out.value = self.value.transpose()
+        return out 
+
     def __add__(self,X):
         out = VectorReal(Nd=self.Nd)
         if isinstance(X, VectorReal):
@@ -222,7 +215,6 @@ class VectorReal():
             out.value = self.value + X.value
         elif isinstance(X, Real):
             out.value = self.value + X.value
-        out.update_value()
         return out
 
     def __sub__(self,X):
@@ -232,15 +224,22 @@ class VectorReal():
             out.value = self.value - X.value
         elif isinstance(X, Real):
             out.value = self.value - X.value
-        out.update_value()
         return out
 
     def __mul__(self,X):
-        out = RealMatrix(self.N)
-        if isinstance(X, RealMatrix):
-            assert(self.value.shape[1]==X.value.shape[0])
+        out = VectorReal(Nd=self.Nd)
+        if isinstance(X, VectorReal):
+            assert(self.value.shape==X.value.shape)
+            out.value = self.value * X.value
+        elif isinstance(X, Real):
+            out.value = self.value * X.value
+        return out
+
+    def dot(self,X):
+        out = VectorReal(Nd=self.Nd)
+        if isinstance(X, VectorReal):
+            assert(self.value.shape==X.value.shape)
             out.value = np.dot(self.value,X.value)
-        elif isinstance(X, (Complex,Real)):
+        elif isinstance(X, Real):
             out.value = self.value*X.value
-        out.update_value()
         return out

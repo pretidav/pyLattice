@@ -87,3 +87,11 @@ def test_inv_complexmatrix():
 def test_adj_complexmatrix():
     assert(np.sum(Bc.adj().value - np.array([[2,0],[1-7j,2-9j]])) < tol) 
 
+def test_vectorreal():
+    v = VectorReal(value=np.array([2,3]))
+    w = VectorReal(value=np.array([5,7]))
+    assert(np.sum((v+w).value-np.array([7,10]))<tol)    
+    assert(np.sum((v-w).value-np.array([-3,-4]))<tol)    
+    assert(np.sum((v*w).value-np.array([10,21]))<tol)    
+    assert(((v.dot(w)).value-31)<tol)    
+    
