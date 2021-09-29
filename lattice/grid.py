@@ -137,6 +137,10 @@ class LatticeRealMatrix():
         out.value = out.get_value()
         return out
 
+    def update_value(self):
+        for i,g in enumerate(self.grid):
+            g.value = self.value[i]
+
     def __add__(self,X):
         out = LatticeRealMatrix(lattice=self.lattice, N=self.N)
         if isinstance(X, LatticeRealMatrix):
@@ -146,6 +150,7 @@ class LatticeRealMatrix():
         if isinstance(X, RealMatrix):
             assert(self.grid[0].value.shape==X.value.shape)
             out.value = self.value + X.value
+        out.update_value()
         return out
 
     def __sub__(self,X):
@@ -157,6 +162,7 @@ class LatticeRealMatrix():
         if isinstance(X, RealMatrix):
             assert(self.grid[0].value.shape==X.value.shape)
             out.value = self.value - X.value
+        out.update_value()
         return out
 
     def __mul__(self,X):
@@ -170,6 +176,7 @@ class LatticeRealMatrix():
             out.value = np.dot(self.value, X.value)
         if isinstance(X, Real):
             out.value = self.value * X.value
+        out.update_value()
         return out
 
 class LatticeComplexMatrix(): 

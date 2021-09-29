@@ -202,6 +202,10 @@ class VectorReal():
     def get_value(self):
         return np.array([a.value for a in self.vector])
 
+    def update_value(self):
+        for i,v in enumerate(self.vector):
+            v.value = self.value[i]
+
     def peek_component(self,mu):
         return self.vector[mu]
 
@@ -218,6 +222,7 @@ class VectorReal():
             out.value = self.value + X.value
         elif isinstance(X, Real):
             out.value = self.value + X.value
+        out.update_value()
         return out
 
     def __sub__(self,X):
@@ -227,6 +232,7 @@ class VectorReal():
             out.value = self.value - X.value
         elif isinstance(X, Real):
             out.value = self.value - X.value
+        out.update_value()
         return out
 
     def __mul__(self,X):
@@ -236,4 +242,5 @@ class VectorReal():
             out.value = np.dot(self.value,X.value)
         elif isinstance(X, (Complex,Real)):
             out.value = self.value*X.value
+        out.update_value()
         return out
