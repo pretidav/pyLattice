@@ -329,6 +329,11 @@ class VectorReal():
         elif isinstance(rhs, Real):
             out.value = self.value*rhs.value
         return out
+    
+    def transpose(self):
+        out = VectorReal(Nd=self.Nd)
+        out.value = self.value[:]
+        return out
 
 
 class VectorComplex():
@@ -402,3 +407,202 @@ class VectorComplex():
         elif isinstance(rhs, (Real,Complex)):
             out.value = self.value*rhs.value
         return out
+    
+    def transpose(self):
+        out = VectorComplex(Nd=self.Nd)
+        out.value = self.value[:]
+        return out
+
+
+class VectorRealMatrix():
+    def __init__(self, Nd:int = None, N:int = None, value: np.ndarray = None):
+        self.Nd = Nd 
+        self.N  = N
+        self.value = np.zeros(shape=(Nd,N,N), dtype=float)
+        
+    def __getitem__(self,mu:int):
+        return self.value[mu]
+
+    def poke_component(self, mu: int, m):
+        if isinstance(m,RealMatrix):
+            self.value[mu] = m.value
+        elif isinstance(m,np.ndarray):
+            self.value[mu] = m
+    
+    def __add__(self,rhs):
+        out = VectorRealMatrix(Nd=self.Nd,N=self.N)
+        if isinstance(rhs, VectorRealMatrix):
+            assert(self.value.shape==rhs.value.shape)
+            for mu in range(self.Nd):
+                out.value[mu] = self.value[mu] + rhs.value[mu]
+        elif isinstance(rhs, RealMatrix):
+            for mu in range(self.Nd):
+                out.value[mu] = self.value[mu] + rhs.value
+        elif isinstance(rhs, Real):
+            out.value = self.value + rhs.value
+        elif isinstance(rhs, (int,float)):
+            out.value = self.value + rhs    
+        return out
+
+    def __radd__(self,lhs):
+        out = VectorRealMatrix(Nd=self.Nd,N=self.N)
+        if isinstance(lhs, VectorRealMatrix):
+            assert(self.value.shape==lhs.value.shape)
+            for mu in range(self.Nd):
+                out.value[mu] = self.value[mu] + lhs.value[mu]
+        elif isinstance(lhs, RealMatrix):
+            for mu in range(self.Nd):
+                out.value[mu] = self.value[mu] + lhs.value
+        elif isinstance(lhs, Real):
+            out.value = self.value + lhs.value
+        elif isinstance(lhs, (float,int)):
+            out.value = self.value + lhs   
+        return out
+
+    def __sub__(self,rhs):
+        out = VectorRealMatrix(Nd=self.Nd,N=self.N)
+        if isinstance(rhs, VectorRealMatrix):
+            assert(self.value.shape==rhs.value.shape)
+            for mu in range(self.Nd):
+                out.value[mu] = self.value[mu] - rhs.value[mu]
+        elif isinstance(rhs, RealMatrix):
+            for mu in range(self.Nd):
+                out.value[mu] = self.value[mu] - rhs.value
+        elif isinstance(rhs, Real):
+            out.value = self.value - rhs.value
+        elif isinstance(rhs, (int,float)):
+            out.value = self.value - rhs    
+        return out
+
+    def __rsub__(self,lhs):
+        out = VectorRealMatrix(Nd=self.Nd,N=self.N)
+        if isinstance(lhs, VectorRealMatrix):
+            assert(self.value.shape==lhs.value.shape)
+            for mu in range(self.Nd):
+                out.value[mu] = lhs.value[mu] - self.value[mu]
+        if isinstance(lhs, RealMatrix):
+            for mu in range(self.Nd):
+                out.value[mu] = lhs.value - self.value[mu]
+        elif isinstance(lhs, Real):
+            out.value = lhs.value - self.value
+        elif isinstance(lhs, (float,int)):
+            out.value = lhs - self.value   
+        return out
+
+    def __mul__(self,rhs):
+        out = VectorRealMatrix(Nd=self.Nd,N=self.N)
+        if isinstance(rhs, VectorRealMatrix):
+            assert(self.value.shape==rhs.value.shape)
+            for mu in range(self.Nd):
+                out.value[mu] = np.dot(self.value[mu] , rhs.value[mu])
+        elif isinstance(rhs, RealMatrix):
+            for mu in range(self.Nd):
+                out.value[mu] = np.dot(self.value[mu] , rhs.value)
+        elif isinstance(rhs, Real):
+            out.value = self.value * rhs.value
+        elif isinstance(rhs, (float,int)):
+            out.value = self.value * rhs    
+        return out
+
+    def transpose(self):
+        out = VectorRealMatrix(Nd=self.Nd)
+        out.value = self.value[:]
+        return out
+
+
+class VectorComplexMatrix():
+    def __init__(self, Nd:int = None, N:int = None, value: np.ndarray = None):
+        self.Nd = Nd 
+        self.N  = N
+        self.value = np.zeros(shape=(Nd,N,N), dtype=complex)
+        
+    def __getitem__(self,mu:int):
+        return self.value[mu]
+
+    def poke_component(self, mu: int, m):
+        if isinstance(m,ComplexMatrix):
+            self.value[mu] = m.value
+        elif isinstance(m,np.ndarray):
+            self.value[mu] = m
+    
+    def __add__(self,rhs):
+        out = VectorComplexMatrix(Nd=self.Nd,N=self.N)
+        if isinstance(rhs, (VectorComplexMatrix,VectorRealMatrix)):
+            assert(self.value.shape==rhs.value.shape)
+            for mu in range(self.Nd):
+                out.value[mu] = self.value[mu] + rhs.value[mu]
+        elif isinstance(rhs, (ComplexMatrix,RealMatrix)):
+            for mu in range(self.Nd):
+                out.value[mu] = self.value[mu] + rhs.value
+        elif isinstance(rhs, (Complex,Real)):
+            out.value = self.value + rhs.value
+        elif isinstance(rhs, (int,float,complex)):
+            out.value = self.value + rhs    
+        return out
+
+    def __radd__(self,lhs):
+        out = VectorComplexMatrix(Nd=self.Nd,N=self.N)
+        if isinstance(lhs, (VectorComplexMatrix,VectorRealMatrix)):
+            assert(self.value.shape==lhs.value.shape)
+            for mu in range(self.Nd):
+                out.value[mu] = self.value[mu] + lhs.value[mu]
+        elif isinstance(lhs, (ComplexMatrix,RealMatrix)):
+            for mu in range(self.Nd):
+                out.value[mu] = self.value[mu] + lhs.value
+        elif isinstance(lhs, (Complex,Real)):
+            out.value = self.value + lhs.value
+        elif isinstance(lhs, (float,int,complex)):
+            out.value = self.value + lhs   
+        return out
+
+    def __sub__(self,rhs):
+        out = VectorComplexMatrix(Nd=self.Nd,N=self.N)
+        if isinstance(rhs, (VectorComplexMatrix,VectorRealMatrix)):
+            assert(self.value.shape==rhs.value.shape)
+            for mu in range(self.Nd):
+                out.value[mu] = self.value[mu] - rhs.value[mu]
+        elif isinstance(rhs, (ComplexMatrix,RealMatrix)):
+            for mu in range(self.Nd):
+                out.value[mu] = self.value[mu] - rhs.value
+        elif isinstance(rhs, (Complex,Real)):
+            out.value = self.value - rhs.value
+        elif isinstance(rhs, (int,float,complex)):
+            out.value = self.value - rhs    
+        return out
+
+    def __rsub__(self,lhs):
+        out = VectorComplexMatrix(Nd=self.Nd,N=self.N)
+        if isinstance(lhs, (VectorComplexMatrix,VectorRealMatrix)):
+            assert(self.value.shape==lhs.value.shape)
+            for mu in range(self.Nd):
+                out.value[mu] = lhs.value[mu] - self.value[mu]
+        if isinstance(lhs, (ComplexMatrix,RealMatrix)):
+            for mu in range(self.Nd):
+                out.value[mu] = lhs.value - self.value[mu]
+        elif isinstance(lhs, (Complex,Real)):
+            out.value = lhs.value - self.value
+        elif isinstance(lhs, (float,int,complex)):
+            out.value = lhs - self.value   
+        return out
+
+    def __mul__(self,rhs):
+        out = VectorComplexMatrix(Nd=self.Nd,N=self.N)
+        if isinstance(rhs, (VectorComplexMatrix,VectorRealMatrix)):
+            assert(self.value.shape==rhs.value.shape)
+            for mu in range(self.Nd):
+                out.value[mu] = np.dot(self.value[mu] , rhs.value[mu])
+        elif isinstance(rhs, (ComplexMatrix,RealMatrix)):
+            for mu in range(self.Nd):
+                out.value[mu] = np.dot(self.value[mu] , rhs.value)
+        elif isinstance(rhs, (Complex,Real)):
+            out.value = self.value * rhs.value
+        elif isinstance(rhs, (float,int,complex)):
+            out.value = self.value * rhs    
+        return out
+
+    def transpose(self):
+        out = VectorComplexMatrix(Nd=self.Nd)
+        out.value = self.value[:]
+        return out
+
+
