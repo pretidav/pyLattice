@@ -26,50 +26,79 @@ class LatticeBase():
             idx *= self.size[d]
             idx += x[d]
         return idx
-    
-    def peek_coor(self,grid,idx):
-        return grid[idx]
         
 class LatticeReal():
     def __init__(self,lattice: LatticeBase):
-        self.lattice = lattice
-        self.fill_grid() 
-        self.value = self.get_value()
+        self.lattice = lattice 
+        self.value = np.zeros(shape=(self.lattice.length,1),dtype=float)
 
-    def fill_grid(self, n=0):
+    def fill_value(self, n=0):
         if isinstance(n,Real):
-            self.grid = [n]*self.lattice.length
+            self.value[:] = n.value
         elif isinstance(n, (float,int)):
-            self.grid = [Real(n)]*self.lattice.length
-        self.value = self.get_value()
-    
+            self.value = n
+        
+    def __getitem__(self, idx:int):
+            return self.value[idx,:]
+
     def moveforward(self,mu,step=1): 
         self.lattice.moveforward(mu=mu,step=1)
 
     def movebackward(self,mu,step=1): 
         self.lattice.movebackward(mu=mu,step=1)
         
-    def get_idx(self,x):
-        return self.lattice.get_idx(x=x)
+    def get_idx(self,coor):
+        return self.lattice.get_idx(x=coor)
 
-    def peek_coor(self,idx):
-        return self.lattice.peek_coor(grid=self.grid,idx=idx)
+    def __add__(self,rhs):
+        out = LatticeReal(lattice=self.lattice)
+        if isinstance(rhs, LatticeReal):
+            assert(self.value.shape==rhs.value.shape)
+            out.value = self.value + rhs.value
+        elif isinstance(rhs, Real):
+            out.value = self.value + rhs.value
+        elif isinstance(rhs, (int,float)):
+            out.value = self.value + rhs    
+        return out
 
-    def get_value(self):
-        return np.array([a.value for a in self.grid])
+    def __sub__(self,rhs):
+        out = LatticeReal(lattice=self.lattice)
+        if isinstance(rhs, LatticeReal):
+            assert(self.value.shape==rhs.value.shape)
+            out.value = self.value - rhs.value
+        elif isinstance(rhs, Real):
+            out.value = self.value - rhs.value
+        elif isinstance(rhs, (int,float)):
+            out.value = self.value - rhs    
+        return out
+
+    def __mul__(self,rhs):
+        out = LatticeReal(lattice=self.lattice)
+        if isinstance(rhs, LatticeReal):
+            assert(self.value.shape==rhs.value.shape)
+            for i in range(out.lattice.length):
+                out.value[i] = self.value[i] * rhs.value[i]
+        elif isinstance(rhs, Real):
+            for i in range(out.lattice.length):
+                out.value[i] = self.value[i] * rhs.value
+        elif isinstance(rhs, (int,float)):
+            for i in range(out.lattice.length):
+                out.value[i] = self.value[i] * rhs
+        return out
 
 class LatticeComplex():
     def __init__(self,lattice: LatticeBase):
-        self.lattice = lattice
-        self.fill_grid()
-        self.value = self.get_value()
+        self.lattice = lattice 
+        self.value = np.zeros(shape=(self.lattice.length,1),dtype=complex)
 
-    def fill_grid(self, n=0):
-        if isinstance(n,Complex):
-            self.grid = [n]*self.lattice.length
-        elif isinstance(n, (float,int,complex)):
-            self.grid = [Complex(n)]*self.lattice.length
-        self.value = self.get_value()
+    def fill_value(self, n=0):
+        if isinstance(n,(Real,Complex)):
+            self.value[:] = n.value
+        elif isinstance(n, (complex,float,int)):
+            self.value = n
+
+    def __getitem__(self, idx:int):
+            return self.value[idx,:]
 
     def moveforward(self,mu,step=1): 
         self.lattice.moveforward(mu=mu,step=1)
@@ -79,24 +108,52 @@ class LatticeComplex():
         
     def get_idx(self,x):
         return self.lattice.get_idx(x=x)
+       
+    
+    def __add__(self,rhs):
+        out = LatticeComplex(lattice=self.lattice)
+        if isinstance(rhs, (LatticeReal,LatticeComplex)):
+            assert(self.value.shape==rhs.value.shape)
+            out.value = self.value + rhs.value
+        elif isinstance(rhs, (Complex,Real)):
+            out.value = self.value + rhs.value
+        elif isinstance(rhs, (int,float,complex)):
+            out.value = self.value + rhs    
+        return out
 
-    def peek_coor(self,idx):
-        return self.lattice.peek_coor(grid=self.grid,idx=idx)
+    def __sub__(self,rhs):
+        out = LatticeComplex(lattice=self.lattice)
+        if isinstance(rhs, (LatticeComplex,LatticeReal)):
+            assert(self.value.shape==rhs.value.shape)
+            out.value = self.value - rhs.value
+        elif isinstance(rhs, (Complex,Real)):
+            out.value = self.value - rhs.value
+        elif isinstance(rhs, (int,float,complex)):
+            out.value = self.value - rhs    
+        return out
 
-    def get_value(self):
-        return np.array([a.value for a in self.grid])
-        
+    def __mul__(self,rhs):
+        out = LatticeComplex(lattice=self.lattice)
+        if isinstance(rhs, (LatticeComplex,LatticeReal)):
+            assert(self.value.shape==rhs.value.shape)
+            for i in range(out.lattice.length):
+                out.value[i] = self.value[i] * rhs.value[i]
+        elif isinstance(rhs, (Complex,Real)):
+            for i in range(out.lattice.length):
+                out.value[i] = self.value[i] * rhs.value
+        elif isinstance(rhs, (int,float,complex)):
+            for i in range(out.lattice.length):
+                out.value[i] = self.value[i] * rhs
+        return out
 class LatticeRealMatrix(): 
     def __init__(self, lattice: LatticeBase, N: int):
         self.N = N
-        self.lattice = lattice
-        self.fill_grid(RealMatrix(N=self.N))
-        self.value = self.get_value()
+        self.lattice = lattice 
+        self.value = np.zeros(shape=(self.lattice.length,N,N),dtype=float)
 
-    def fill_grid(self, n:RealMatrix):
+    def fill_value(self, n:RealMatrix):
         if isinstance(n,RealMatrix):
-            self.grid = [n]*self.lattice.length
-        self.value = self.get_value()
+            self.value[:] = n.value
 
     def moveforward(self,mu,step=1): 
         self.lattice.moveforward(mu=mu,step=1)
@@ -107,133 +164,117 @@ class LatticeRealMatrix():
     def get_idx(self,x):
         return self.lattice.get_idx(x=x)
 
-    def peek_coor(self,idx):
-        return self.lattice.peek_coor(grid=self.grid,idx=idx)
-
-    def get_value(self):
-        return np.array([a.value for a in self.grid])
+    def __getitem__(self, idx:int):
+            return self.value[idx,:]
     
     def transpose(self):
         out = LatticeRealMatrix(lattice=self.lattice, N=self.N)
-        out.grid = [a.transpose() for a in self.grid]
-        out.value = out.get_value()
+        for i in range(self.lattice.length):
+            out.value[i]=np.transpose(self.value[i,:,:])
         return out 
 
     def trace(self):
         out = LatticeReal(lattice=self.lattice)
-        out.grid = np.array([a.trace() for a in self.grid])
-        out.value = out.get_value()
-        return out
-    
+        for i in range(self.lattice.length):
+            out.value[i]=np.trace(self.value[i,:,:])
+        return out 
+
     def det(self):
         out = LatticeReal(lattice=self.lattice)
-        out.grid = np.array([a.det() for a in self.grid])
-        out.value = out.get_value()
-        return out
+        for i in range(self.lattice.length):
+            out.value[i]=np.linalg.det(self.value[i,:,:])
+        return out 
 
     def inv(self):
         out = LatticeRealMatrix(lattice=self.lattice, N=self.N)
-        out.grid = np.array([a.inv() for a in self.grid])
-        out.value = out.get_value()
+        for i in range(self.lattice.length):
+            out.value[i]=np.linalg.inv(self.value[i,:,:])
+        return out 
+
+    def __add__(self,rhs):
+        out = LatticeRealMatrix(lattice=self.lattice, N=self.N)
+        if isinstance(rhs, LatticeRealMatrix):
+            assert(self.value.shape==rhs.value.shape)
+            out.value = self.value + rhs.value
+        elif isinstance(rhs, RealMatrix):
+            assert(self.value[0].shape==rhs.value.shape)
+            out.value = self.value + rhs.value
         return out
 
-    def update_value(self):
-        for i,g in enumerate(self.grid):
-            g.value = self.value[i]
-
-    def __add__(self,X):
+    def __sub__(self,rhs):
         out = LatticeRealMatrix(lattice=self.lattice, N=self.N)
-        if isinstance(X, LatticeRealMatrix):
-            assert(len(self.grid)==len(X.grid))
-            assert(self.grid[0].value.shape==X.grid[0].value.shape)
-            out.value = self.value + X.value
-        if isinstance(X, RealMatrix):
-            assert(self.grid[0].value.shape==X.value.shape)
-            out.value = self.value + X.value
-        out.update_value()
+        if isinstance(rhs, LatticeRealMatrix):
+            assert(self.value.shape==rhs.value.shape)
+            out.value = self.value - rhs.value
+        elif isinstance(rhs, RealMatrix):
+            assert(self.value[0].shape==rhs.value.shape)
+            out.value = self.value - rhs.value
         return out
 
-    def __sub__(self,X):
+    def __mul__(self,rhs):
         out = LatticeRealMatrix(lattice=self.lattice, N=self.N)
-        if isinstance(X, LatticeRealMatrix):
-            assert(len(self.grid)==len(X.grid))
-            assert(self.grid[0].value.shape==X.grid[0].value.shape)
-            out.value = self.value - X.value
-        if isinstance(X, RealMatrix):
-            assert(self.grid[0].value.shape==X.value.shape)
-            out.value = self.value - X.value
-        out.update_value()
-        return out
-
-    def __mul__(self,X):
-        out = LatticeRealMatrix(lattice=self.lattice, N=self.N)
-        if isinstance(X, LatticeRealMatrix):
-            assert(len(self.grid)==len(X.grid))
-            assert(self.grid[0].value.shape==X.grid[0].value.shape)
-            out.value = np.dot(self.value , X.value)
-        if isinstance(X, RealMatrix):
-            assert(self.grid[0].value.shape==X.value.shape)
-            out.value = np.dot(self.value, X.value)
-        if isinstance(X, Real):
-            out.value = self.value * X.value
-        out.update_value()
+        if isinstance(rhs, LatticeRealMatrix):
+            assert(self.value.shape==rhs.value.shape)
+            for i in range(out.lattice.length):
+                out.value[i] = np.dot(self.value[i] , rhs.value[i])
+        elif isinstance(rhs, RealMatrix):
+            assert(self.value[0].shape==rhs.value.shape)
+            for i in range(out.lattice.length):
+                out.value[i] = np.dot(self.value[i], rhs.value)
+        elif isinstance(rhs, Real):
+            out.value = self.value * rhs.value
         return out
 
 class LatticeComplexMatrix(): 
     def __init__(self, lattice: LatticeBase, N: int):
         self.N = N
-        self.lattice = lattice
-        self.fill_grid(ComplexMatrix(N=self.N))
-        self.value = self.get_value()
+        self.lattice = lattice 
+        self.value = np.zeros(shape=(self.lattice.length,N,N),dtype=complex)
 
-    def fill_grid(self, n:ComplexMatrix):
+    def fill_value(self, n:ComplexMatrix):
         if isinstance(n,ComplexMatrix):
-            self.grid = [n]*self.lattice.length
-        self.value = self.get_value()
+            self.value[:] = n.value
 
     def moveforward(self,mu,step=1): 
         self.lattice.moveforward(mu=mu,step=1)
 
     def movebackward(self,mu,step=1): 
         self.lattice.movebackward(mu=mu,step=1)
-        
+    
+    def __getitem__(self, idx:int):
+            return self.value[idx,:]
+    
     def get_idx(self,x):
         return self.lattice.get_idx(x=x)
 
-    def peek_coor(self,idx):
-        return self.lattice.peek_coor(grid=self.grid,idx=idx)
-
-    def get_value(self):
-        return np.array([a.value for a in self.grid])
-    
     def transpose(self):
         out = LatticeComplexMatrix(lattice=self.lattice, N=self.N)
-        out.grid = [a.transpose() for a in self.grid]
-        out.value = out.get_value()
+        for i in range(self.lattice.length):
+            out.value[i]=np.transpose(self.value[i,:,:])
         return out 
 
     def trace(self):
-        out = LatticeComplex(lattice=self.lattice)
-        out.grid = np.array([a.trace() for a in self.grid])
-        out.value = out.get_value()
-        return out
+        out = LatticeComplexMatrix(lattice=self.lattice, N=self.N)
+        for i in range(self.lattice.length):
+            out.value[i]=np.trace(self.value[i,:,:])
+        return out 
     
     def det(self):
-        out = LatticeComplex(lattice=self.lattice)
-        out.grid = np.array([a.det() for a in self.grid])
-        out.value = out.get_value()
-        return out
+        out = LatticeComplexMatrix(lattice=self.lattice, N=self.N)
+        for i in range(self.lattice.length):
+            out.value[i]=np.linalg.det(self.value[i,:,:])
+        return out 
 
     def inv(self):
         out = LatticeComplexMatrix(lattice=self.lattice, N=self.N)
-        out.grid = np.array([a.inv() for a in self.grid])
-        out.value = out.get_value()
-        return out
+        for i in range(self.lattice.length):
+            out.value[i]=np.linalg.inv(self.value[i,:,:])
+        return out 
 
     def conj(self):
         out = LatticeComplexMatrix(lattice=self.lattice, N=self.N)
-        out.grid = np.array([a.conj() for a in self.grid])
-        out.value = out.get_value()
+        for i in range(self.lattice.length):
+            out.value[i]=np.conj(self.value[i,:,:])
         return out 
 
     def adj(self):
@@ -243,47 +284,46 @@ class LatticeComplexMatrix():
 
     def re(self):
         out = LatticeRealMatrix(lattice=self.lattice, N=self.N)
-        out.grid = np.array([a.re() for a in self.grid])
-        out.value = out.get_value()
+        out.value = np.real(self.value)
         return out
 
     def im(self):
         out = LatticeRealMatrix(lattice=self.lattice, N=self.N)
-        out.grid = np.array([a.im() for a in self.grid])
-        out.value = out.get_value()
+        out.value = np.imag(self.value)
         return out
 
-    def __add__(self,X):
+    def __add__(self,rhs):
         out = LatticeComplexMatrix(lattice=self.lattice, N=self.N)
-        if isinstance(X, (LatticeComplexMatrix,LatticeRealMatrix)):
-            assert(len(self.grid)==len(X.grid))
-            assert(self.grid[0].value.shape==X.grid[0].value.shape)
-            out.value = self.value + X.value
-        if isinstance(X, (ComplexMatrix,RealMatrix)):
-            assert(self.grid[0].value.shape==X.value.shape)
-            out.value = self.value + X.value
+        if isinstance(rhs, (LatticeComplexMatrix,LatticeRealMatrix)):
+            assert(self.value.shape==rhs.value.shape)
+            out.value = self.value + rhs.value
+        elif isinstance(rhs, (ComplexMatrix,RealMatrix)):
+            assert(self.value[0].shape==rhs.value.shape)
+            out.value = self.value + rhs.value
         return out
 
-    def __sub__(self,X):
-        out = LatticeRealMatrix(lattice=self.lattice, N=self.N)
-        if isinstance(X, (LatticeRealMatrix,LatticeComplexMatrix)):
-            assert(len(self.grid)==len(X.grid))
-            assert(self.grid[0].value.shape==X.grid[0].value.shape)
-            out.value = self.value - X.value
-        if isinstance(X, (RealMatrix,ComplexMatrix)):
-            assert(self.grid[0].value.shape==X.value.shape)
-            out.value = self.value - X.value
+    def __sub__(self,rhs):
+        out = LatticeComplexMatrix(lattice=self.lattice, N=self.N)
+        if isinstance(rhs, (LatticeRealMatrix,LatticeComplexMatrix)):
+            assert(self.value.shape==rhs.value.shape)
+            out.value = self.value - rhs.value
+        elif isinstance(rhs, (RealMatrix,ComplexMatrix)):
+            assert(self.value[0].shape==rhs.value.shape)
+            out.value = self.value - rhs.value
         return out
 
-    def __mul__(self,X):
-        out = LatticeRealMatrix(lattice=self.lattice, N=self.N)
-        if isinstance(X, (LatticeRealMatrix,LatticeComplexMatrix)):
-            assert(len(self.grid)==len(X.grid))
-            assert(self.grid[0].value.shape==X.grid[0].value.shape)
-            out.value = np.dot(self.value , X.value)
-        if isinstance(X, (RealMatrix,ComplexMatrix)):
-            assert(self.grid[0].value.shape==X.value.shape)
-            out.value = np.dot(self.value, X.value)
-        if isinstance(X, (Real,Complex)):
-            out.value = self.value * X.value
+    def __mul__(self,rhs):
+        out = LatticeComplexMatrix(lattice=self.lattice, N=self.N)
+        if isinstance(rhs, (LatticeRealMatrix,LatticeComplexMatrix)):
+            assert(self.value.shape==rhs.value.shape)
+            for i in range(self.lattice.length):
+                out.value[i] = np.dot(self.value[i] , rhs.value[i])
+        elif isinstance(rhs, (RealMatrix,ComplexMatrix)):
+            assert(self.value[0].shape==rhs.value.shape)
+            for i in range(self.lattice.length):
+                out.value[i] = np.dot(self.value[i], rhs.value)
+        elif isinstance(rhs, (Real,Complex)):
+            out.value = self.value * rhs.value
+        elif isinstance(rhs, (float,int,complex)):
+            out.value = self.value * rhs    
         return out
