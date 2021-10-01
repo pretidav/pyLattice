@@ -10,7 +10,7 @@ class LatticeBase():
         self.dimensions = len(size)
         self.coor   = np.array([0]*self.size,dtype=int)
         self.idx    = self.get_idx(self.coor) 
-        self.length = np.prod(self.size)
+        self.length = np.prod(self.size)   
 
     def moveforward(self,mu,step=1): 
         self.coor[mu] = (self.coor[mu] + step)%self.size[mu]
@@ -26,7 +26,7 @@ class LatticeBase():
             idx *= self.size[d]
             idx += x[d]
         return idx
-        
+
 class LatticeReal():
     def __init__(self,lattice: LatticeBase):
         self.lattice = lattice 
@@ -145,6 +145,7 @@ class LatticeComplex():
             for i in range(out.lattice.length):
                 out.value[i] = self.value[i] * rhs
         return out
+
 class LatticeRealMatrix(): 
     def __init__(self, lattice: LatticeBase, N: int):
         self.N = N

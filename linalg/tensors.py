@@ -177,7 +177,7 @@ class ComplexMatrix(RealMatrix):
         else:
             self.N = len(value)
             self.value = value
-    
+
     def transpose(self):
         out = ComplexMatrix(self.N)
         out.value = np.transpose(self.value)
@@ -268,7 +268,7 @@ class VectorReal():
             self.value = value
 
     def __getitem__(self,mu:int):
-        return self.value[mu]
+        return Real(self.value[mu])
 
     def poke_component(self, mu: int, m):
         if isinstance(m,Real):
@@ -346,7 +346,7 @@ class VectorComplex():
             self.value = value
 
     def __getitem__(self,mu:int):
-        return self.value[mu]
+        return Complex(self.value[mu])
 
     def poke_component(self, mu: int, m):
         if isinstance(m,Complex):
@@ -421,7 +421,9 @@ class VectorRealMatrix():
         self.value = np.zeros(shape=(Nd,N,N), dtype=float)
         
     def __getitem__(self,mu:int):
-        return self.value[mu]
+        out = RealMatrix(N=self.N)
+        out.value = self.value[mu]
+        return out
 
     def poke_component(self, mu: int, m):
         if isinstance(m,RealMatrix):
@@ -517,7 +519,9 @@ class VectorComplexMatrix():
         self.value = np.zeros(shape=(Nd,N,N), dtype=complex)
         
     def __getitem__(self,mu:int):
-        return self.value[mu]
+        out = ComplexMatrix(N=self.N)
+        out.value = self.value[mu]
+        return out
 
     def poke_component(self, mu: int, m):
         if isinstance(m,ComplexMatrix):
