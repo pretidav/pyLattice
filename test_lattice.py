@@ -1,23 +1,24 @@
 from lattice.grid import *
 tol = 10e-6
+Grid = LatticeBase(size=[4,4])
+Grid.movebackward(mu=0)
+print(Grid.tensor_idx[1,1])
+print(Grid.flat_idx)
 
 def test_moveforward():
     Grid = LatticeBase(size=[4,4])
     Grid.moveforward(mu=1)
     Grid.moveforward(mu=1)
-    assert(np.sum(Grid.coor-np.array([0,2]))<tol)
+    assert(Grid.tensor_idx[1,1] == 7)
+    assert(np.sum(Grid.flat_idx - [2,3,0,1,6,7,4,5,10,11,8,9,14,15,12,13])<tol)
+    
 
 def test_movebackward():
     Grid = LatticeBase(size=[4,4])
     Grid.movebackward(mu=0)
-    assert(np.sum(Grid.coor-np.array([3,0]))<tol)
-
-def test_idx():
-    Grid = LatticeBase(size=[4,4])
-    Grid.moveforward(mu=1)
-    Grid.moveforward(mu=0)
-    assert(Grid.get_idx(Grid.coor)==5)
-
+    assert(Grid.tensor_idx[1,1] == 9)
+    assert(np.sum(Grid.flat_idx - [4,5,6,7,8,9,10,11,12,13,14,15,0,1,2,3])<tol)
+    
 def test_realfield():
     Grid = LatticeBase(size=[4,4])
     RealField = LatticeReal(lattice=Grid)

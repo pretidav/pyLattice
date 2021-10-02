@@ -6,26 +6,36 @@ class LatticeBase():
         if isinstance(size,np.ndarray):
             self.size = size
         else :
-            self.size = np.array(size)
-        self.dimensions = len(size)
-        self.coor   = np.array([0]*self.size,dtype=int)
-        self.idx    = self.get_idx(self.coor) 
-        self.length = np.prod(self.size)   
+            self.size    = np.array(size)
+        self.dimensions  = len(size)
+        self.length      = np.prod(self.size)   
+        self.flat_idx    = self.get_flat_idx() 
+        self.tensor_idx  = self.get_tensor_idx(idx=self.flat_idx)
 
     def moveforward(self,mu,step=1): 
-        self.coor[mu] = (self.coor[mu] + step)%self.size[mu]
-        self.idx = self.get_idx(self.coor)
+        self.tensor_idx = np.roll(self.tensor_idx,shift=step,axis=mu)
+        self.update_flat_idx()
 
     def movebackward(self,mu,step=1): 
-        self.coor[mu] = (self.coor[mu] - step)%self.size[mu]
-        self.idx = self.get_idx(self.coor)
-        
+        self.tensor_idx = np.roll(self.tensor_idx,shift=-step,axis=mu)
+        self.update_flat_idx()
+
     def get_idx(self,x):
         idx = x[-1]
         for d in reversed(range(len(self.size)-1)):
             idx *= self.size[d]
             idx += x[d]
         return idx
+
+    def get_tensor_idx(self,idx: np.ndarray):
+        out = np.reshape(idx,self.size)
+        return out
+
+    def get_flat_idx(self):
+        return np.array([i for i in range(self.length)])
+        
+    def update_flat_idx(self):
+        self.flat_idx = np.ndarray.flatten(self.tensor_idx)
 
 class LatticeReal():
     def __init__(self,lattice: LatticeBase):
@@ -43,13 +53,12 @@ class LatticeReal():
 
     def moveforward(self,mu,step=1): 
         self.lattice.moveforward(mu=mu,step=1)
+        self.value = self.value[self.lattice.flat_idx]
 
     def movebackward(self,mu,step=1): 
         self.lattice.movebackward(mu=mu,step=1)
+        self.value = self.value[self.lattice.flat_idx]
         
-    def get_idx(self,coor):
-        return self.lattice.get_idx(x=coor)
-
     def __add__(self,rhs):
         out = LatticeReal(lattice=self.lattice)
         if isinstance(rhs, LatticeReal):
@@ -102,14 +111,12 @@ class LatticeComplex():
 
     def moveforward(self,mu,step=1): 
         self.lattice.moveforward(mu=mu,step=1)
+        self.value = self.value[self.lattice.flat_idx]
 
     def movebackward(self,mu,step=1): 
         self.lattice.movebackward(mu=mu,step=1)
+        self.value = self.value[self.lattice.flat_idx]
         
-    def get_idx(self,x):
-        return self.lattice.get_idx(x=x)
-       
-    
     def __add__(self,rhs):
         out = LatticeComplex(lattice=self.lattice)
         if isinstance(rhs, (LatticeReal,LatticeComplex)):
@@ -158,13 +165,12 @@ class LatticeRealMatrix():
 
     def moveforward(self,mu,step=1): 
         self.lattice.moveforward(mu=mu,step=1)
+        self.value = self.value[self.lattice.flat_idx]
 
     def movebackward(self,mu,step=1): 
         self.lattice.movebackward(mu=mu,step=1)
+        self.value = self.value[self.lattice.flat_idx]
         
-    def get_idx(self,x):
-        return self.lattice.get_idx(x=x)
-
     def __getitem__(self, idx:int):
             return self.value[idx,:]
     
@@ -238,16 +244,15 @@ class LatticeComplexMatrix():
 
     def moveforward(self,mu,step=1): 
         self.lattice.moveforward(mu=mu,step=1)
+        self.value = self.value[self.lattice.flat_idx]
 
     def movebackward(self,mu,step=1): 
         self.lattice.movebackward(mu=mu,step=1)
-    
+        self.value = self.value[self.lattice.flat_idx]
+
     def __getitem__(self, idx:int):
             return self.value[idx,:]
     
-    def get_idx(self,x):
-        return self.lattice.get_idx(x=x)
-
     def transpose(self):
         out = LatticeComplexMatrix(lattice=self.lattice, N=self.N)
         for i in range(self.lattice.length):
