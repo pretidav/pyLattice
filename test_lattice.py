@@ -1,3 +1,4 @@
+from numpy import ndarray
 from lattice.grid import *
 tol = 10e-6
 Grid = LatticeBase(size=[4,4])
@@ -11,7 +12,6 @@ def test_moveforward():
     Grid.moveforward(mu=1)
     assert(Grid.tensor_idx[1,1] == 7)
     assert(np.sum(Grid.flat_idx - [2,3,0,1,6,7,4,5,10,11,8,9,14,15,12,13])<tol)
-    
 
 def test_movebackward():
     Grid = LatticeBase(size=[4,4])
@@ -72,4 +72,27 @@ def test_complexmatrixfield():
     assert(np.sum([np.sum(a-np.array([[1,0],[0,4]])) for a in ComplexMatrixField.re().value])<tol)
     assert(np.sum([np.sum(a-np.array([[1,-2j],[-3j,4]])) for a in ComplexMatrixField.conj().value])<tol)
     assert(np.sum([np.sum(a-np.array([[1,-3j],[-2j,4]])) for a in ComplexMatrixField.conj().value])<tol)
+
+def test_realvectorfield():
+    Grid = LatticeBase(size=[4,4])
+    Nd = 3
+    RealVectorField = LatticeVectorReal(lattice=Grid,Nd=Nd)
+    RealVectorField.fill_value(VectorReal(Nd,value=np.array([1,2,3])))
+    RealVectorField2 = LatticeVectorReal(lattice=Grid,Nd=Nd)
+    RealVectorField2.fill_value(VectorReal(Nd,value=np.array([1,2,3])))
+
+    assert(np.sum(RealVectorField[0] -np.array([1,2,3])) <tol)
+    assert(np.sum((RealVectorField+RealVectorField2)[0] -np.array([2,4,6])) <tol)
+    
+
+def test_complexvectorfield():
+    Grid = LatticeBase(size=[4,4])
+    Nd = 3
+    ComplexVectorField = LatticeVectorComplex(lattice=Grid,Nd=Nd)
+    ComplexVectorField.fill_value(VectorComplex(Nd,value=np.array([1j,2,3])))
+    ComplexVectorField2 = LatticeVectorComplex(lattice=Grid,Nd=Nd)
+    ComplexVectorField2.fill_value(VectorComplex(Nd,value=np.array([1j,2,3])))
+
+    assert(np.sum(ComplexVectorField[0] -np.array([1j,2,3])) <tol)
+    assert(np.sum((ComplexVectorField+ComplexVectorField2)[0] -np.array([2j,4,6])) <tol)
 

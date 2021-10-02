@@ -1,4 +1,1 @@
-
-TODO: 
-- __ getitem __ for peekindex 
-- fix how to assign value -> value of each object.
+tests for Vector*Matrix, LatticeVector*Matrix
