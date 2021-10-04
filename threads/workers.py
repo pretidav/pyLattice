@@ -18,33 +18,18 @@ class Parallel():
         self.local_grid()
 
     def recursive_split(self,t,factor,n):
-        print(n)
-        print(t)
-        print(factor)
         nn=n
-        out = []
-        for tt in t:
-            print(tt)
-            out.append( np.split(tt,factor[nn],axis=nn) )
-        print('$'*10)
+        out = [np.split(tt,factor[nn],axis=nn) for tt in t][0] #this is wrong
         nn+=1
-        if nn>=len(factor):
-            return 0
-        self.recursive_split(t=out,factor=factor,n=nn)
-        #return out 
+        if nn<len(factor):
+            out = self.recursive_split(t=out,factor=factor,n=nn)
+        return out
 
     def local_grid(self):
         tmp = np.copy(self.tensor_idx)
-        self.recursive_split(t=[tmp],factor=self.pgrid,n=0)
-        #print(tmp)
-        #for n in range(len(self.pgrid)):
-        #t = np.array(np.split(tmp,[self.pgrid[0],self.pgrid[1]],axis=(0,1)))
-        #print(t)  
-        #    break
-        #print([a for a in tmp])
-            #tmp = np.array([np.split(a,self.pgrid[n],axis=n) for a in tmp])
-            #print(tmp)
-    
+        out =  self.recursive_split(t=[tmp],factor=self.pgrid,n=0)
+        print(out)
+
     
 
 
