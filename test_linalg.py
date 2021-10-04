@@ -97,4 +97,14 @@ def test_vectorreal():
     assert(np.sum((M*v).value-np.array([3,18]))<tol)    
     assert(((v.dot(w)).value-31)<tol)    
     
+def test_vectorcomplex():
+    v = VectorComplex(value=np.array([2,3j]))
+    w = VectorComplex(value=np.array([5j,7]))
+    M = ComplexMatrix(value=np.array([[0,1j],[3,4]]))
+    assert(np.sum((v+w).value-np.array([2+5j,7+3j]))<tol)    
+    assert(np.sum((v-w).value-np.array([2-5j,3j-7]))<tol)    
+    assert(np.sum((v*w).value-np.array([10j,21j]))<tol)    
+    assert(np.sum((M*v).value-np.array([3j,6+12j]))<tol)    
+    assert(((v.dot(w)).value-31j)<tol)    
+    
     

@@ -1,10 +1,10 @@
 from numpy import ndarray
 from lattice.grid import *
 tol = 10e-6
-Grid = LatticeBase(size=[4,4])
-Grid.movebackward(mu=0)
-print(Grid.tensor_idx[1,1])
-print(Grid.flat_idx)
+# Grid = LatticeBase(size=[4,4])
+# Grid.movebackward(mu=0)
+# print(Grid.tensor_idx[1,1])
+# print(Grid.flat_idx)
 
 def test_moveforward():
     Grid = LatticeBase(size=[4,4])
@@ -23,7 +23,16 @@ def test_realfield():
     Grid = LatticeBase(size=[4,4])
     RealField = LatticeReal(lattice=Grid)
     RealField.fill_value(3)
-    assert(np.sum(RealField.value-np.array([3]*4*4))<tol)
+    assert(np.sum(RealField.value-np.array([3]*4*4))<tol)    
+    X = LatticeReal(lattice=Grid)
+    X.value = np.array([0,1,1,0,0,1,0,0,1,0,0,1,0,0,1,1])
+    assert(np.sum(X.lattice.flat_idx - np.array([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]))<tol)
+    assert(np.sum(X.lattice.tensor_idx - np.array([[0,1,2,3],[4,5,6,7],[8,9,10,11],[12,13,14,15]]))<tol)
+    X.moveforward(mu=1)
+    assert(np.sum(X.value - np.array([0,0,1,1,0,0,1,0,1,1,0,0,1,0,0,1]))<tol)
+    assert(np.sum(X.lattice.flat_idx - np.array([3,0,1,2,7,4,5,6,11,8,9,10,15,12,13,14]))<tol)
+    assert(np.sum(X.lattice.tensor_idx - np.array([[3,0,1,2],[7,4,5,6],[11,8,9,10],[15,12,13,14]]))<tol)
+
 
 def test_complexfield():
     Grid = LatticeBase(size=[4,4])
