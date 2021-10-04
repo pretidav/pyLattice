@@ -3,7 +3,9 @@ from lattice.grid import *
 tol = 10e-6
 # Grid = LatticeBase(size=[4,4])
 # Grid.movebackward(mu=0)
-# print(Grid.tensor_idx[1,1])
+# print(Grid.tensor_idx)
+# print(list(Grid.tensor_idx.shape))
+
 # print(Grid.flat_idx)
 
 def test_moveforward():
