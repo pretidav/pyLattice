@@ -1,7 +1,7 @@
 from multiprocessing import cpu_count
+from os import error
 from threading import Thread
 import numpy as np
-from numpy.lib.index_tricks import AxisConcatenator
 
 class Worker():
     def __init__(self, f):
@@ -11,12 +11,23 @@ class Worker():
         self.f
 
 class Parallel():
-    def __init__(self, pgrid, tensor_idx, worker = None):
-        self.pgrid  = pgrid 
+    def __init__(self, pgrid, tensor_idx, halo = 1,worker = None):
+        self.pgrid  = pgrid
+        self.N_threads = np.prod(self.pgrid)
+        self.MAX_threads = cpu_count()
+        self.check_cpu_count()
         self.worker = worker
+        self.halo = halo
         self.tensor_idx = tensor_idx
         self.dim = len(pgrid)
         self.ptensor_idx = self.local_grid()
+
+    def check_cpu_count(self):
+        if self.N_threads>self.MAX_threads:
+            print('## ERROR ##')
+            print('## parallelization grid {} requires {} processes'.format(self.pgrid,self.N_threads))
+            print('## Max threads available are {} '.format(self.MAX_threads))
+            exit(1)
 
     def local_grid(self):
         if self.dim>=1:
