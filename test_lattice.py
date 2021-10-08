@@ -1,7 +1,7 @@
 from numpy import ndarray
 from lattice.grid import *
 tol = 10e-6
-# Grid = LatticeBase(size=[4,4])
+# Grid = LatticeBase(grid=[4,4])
 # Grid.movebackward(mu=0)
 # print(Grid.tensor_idx)
 # print(list(Grid.tensor_idx.shape))
@@ -9,20 +9,20 @@ tol = 10e-6
 # print(Grid.flat_idx)
 
 def test_moveforward():
-    Grid = LatticeBase(size=[4,4])
+    Grid = LatticeBase(grid=[4,4])
     Grid.moveforward(mu=1)
     Grid.moveforward(mu=1)
     assert(Grid.tensor_idx[1,1] == 7)
     assert(np.sum(Grid.flat_idx - [2,3,0,1,6,7,4,5,10,11,8,9,14,15,12,13])<tol)
 
 def test_movebackward():
-    Grid = LatticeBase(size=[4,4])
+    Grid = LatticeBase(grid=[4,4])
     Grid.movebackward(mu=0)
     assert(Grid.tensor_idx[1,1] == 9)
     assert(np.sum(Grid.flat_idx - [4,5,6,7,8,9,10,11,12,13,14,15,0,1,2,3])<tol)
     
 def test_realfield():
-    Grid = LatticeBase(size=[4,4])
+    Grid = LatticeBase(grid=[4,4])
     RealField = LatticeReal(lattice=Grid)
     RealField.fill_value(3)
     assert(np.sum(RealField.value-np.array([3]*4*4))<tol)    
@@ -37,13 +37,13 @@ def test_realfield():
 
 
 def test_complexfield():
-    Grid = LatticeBase(size=[4,4])
+    Grid = LatticeBase(grid=[4,4])
     ComplexField = LatticeComplex(lattice=Grid)
     ComplexField.fill_value(1j)
     assert(np.sum(ComplexField.value-np.array([1j]*4*4))<tol)
 
 def test_realmatrixfield():
-    Grid = LatticeBase(size=[4,4])
+    Grid = LatticeBase(grid=[4,4])
     RealMatrixField  = LatticeRealMatrix(lattice=Grid,N=2)
     RealMatrixField2 = LatticeRealMatrix(lattice=Grid,N=2)
     
@@ -62,7 +62,7 @@ def test_realmatrixfield():
     assert(np.sum((RealMatrixField.inv()*r).value-2)<tol)
     
 def test_complexmatrixfield():
-    Grid = LatticeBase(size=[4,4])
+    Grid = LatticeBase(grid=[4,4])
     ComplexMatrixField  = LatticeComplexMatrix(lattice=Grid,N=2)
     ComplexMatrixField2 = LatticeComplexMatrix(lattice=Grid,N=2)
     
@@ -85,7 +85,7 @@ def test_complexmatrixfield():
     assert(np.sum([np.sum(a-np.array([[1,-3j],[-2j,4]])) for a in ComplexMatrixField.conj().value])<tol)
 
 def test_realvectorfield():
-    Grid = LatticeBase(size=[4,4])
+    Grid = LatticeBase(grid=[4,4])
     Nd = 3
     RealVectorField = LatticeVectorReal(lattice=Grid,Nd=Nd)
     RealVectorField.fill_value(VectorReal(Nd,value=np.array([1,2,3])))
@@ -97,7 +97,7 @@ def test_realvectorfield():
     
 
 def test_complexvectorfield():
-    Grid = LatticeBase(size=[4,4])
+    Grid = LatticeBase(grid=[4,4])
     Nd = 3
     ComplexVectorField = LatticeVectorComplex(lattice=Grid,Nd=Nd)
     ComplexVectorField.fill_value(VectorComplex(Nd,value=np.array([1j,2,3])))

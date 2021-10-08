@@ -1,14 +1,17 @@
 import numpy as np
+from multiprocessing import cpu_count
+from threading import Thread
 from linalg.tensors import *
+import time
 
 class LatticeBase():
-    def __init__(self, size):
-        if isinstance(size,np.ndarray):
-            self.size = size
+    def __init__(self, grid):
+        if isinstance(grid,np.ndarray):
+            self.grid = grid
         else :
-            self.size    = np.array(size)
-        self.dimensions  = len(size)
-        self.length      = np.prod(self.size)   
+            self.grid    = np.array(grid)
+        self.dimensions  = len(grid)
+        self.length      = np.prod(self.grid)   
         self.flat_idx    = self.get_flat_idx() 
         self.tensor_idx  = self.get_tensor_idx(idx=self.flat_idx)
 
@@ -22,13 +25,13 @@ class LatticeBase():
 
     def get_idx(self,x):
         idx = x[-1]
-        for d in reversed(range(len(self.size)-1)):
-            idx *= self.size[d]
+        for d in reversed(range(len(self.grid)-1)):
+            idx *= self.grid[d]
             idx += x[d]
         return idx
 
     def get_tensor_idx(self,idx: np.ndarray):
-        out = np.reshape(idx,self.size)
+        out = np.reshape(idx,self.grid)
         return out
 
     def get_flat_idx(self):
@@ -36,6 +39,64 @@ class LatticeBase():
         
     def update_flat_idx(self):
         self.flat_idx = np.ndarray.flatten(self.tensor_idx)
+
+
+class Worker(Thread):
+    def __init__(self, f):
+      Thread.__init__(self)
+      self.f = f
+    def run(self):
+        self.f()
+
+class LatticeParallel(LatticeBase):
+    def __init__(self,grid,pgrid):
+        super().__init__(grid)
+        self.pgrid  = pgrid
+        self.ptensor_idx = None 
+        self.pflat_idx   = None
+
+        self.N_threads = np.prod(self.pgrid)
+        self.MAX_threads = cpu_count()
+        self.check_cpu_count()
+        self.update_pidx()
+
+       
+    def moveforward(self,mu,step=1): 
+        super().moveforward(mu,step)
+        self.update_pidx()
+
+    def movebackward(self,mu,step=1): 
+        super().movebackward(mu,step)
+        self.update_pidx()
+        
+    def update_pidx(self):
+        self.ptensor_idx = self.local_grid()
+        self.pflat_idx = self.get_pflat_idx()
+
+    def get_pflat_idx(self):    
+        return np.array([np.ndarray.flatten(a) for a in self.ptensor_idx[:] ])
+
+    def local_grid(self):
+        return np.reshape(self.tensor_idx,newshape=[np.prod(self.pgrid)]+[int(a/self.pgrid[i]) for i,a in enumerate(self.tensor_idx.shape)])  
+       
+    #https://realpython.com/primer-on-python-decorators/
+    def parallelize(self,func):
+        def wrapper():
+            workers = [Worker(f=func) for _ in range(self.N_threads)]
+            for i,w in enumerate(workers):
+                w.start()
+                print('Thread {} started'.format(i))
+            for w in workers:
+                w.join()       
+            print("All Done")
+        return wrapper 
+
+    def check_cpu_count(self):
+        if self.N_threads>self.MAX_threads:
+            print('## ERROR ##')
+            print('## parallelization grid {} requires {} processes'.format(self.pgrid,self.N_threads))
+            print('## Max threads available are {} '.format(self.MAX_threads))
+            exit(1)
 
 class LatticeReal():
     def __init__(self,lattice: LatticeBase):

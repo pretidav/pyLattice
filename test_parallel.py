@@ -1,4 +1,10 @@
-from threads.workers import *
+from lattice.grid import *
 
 
-p = Parallel(pgrid=[1,1,1],tensor_idx=np.array([[[1,2,3,4],[5,6,7,8],[9,10,11,12],[13,14,15,16]],[[1,2,3,4],[5,6,7,8],[9,10,11,12],[13,14,15,16]],[[1,2,3,4],[5,6,7,8],[9,10,11,12],[13,14,15,16]],[[1,2,3,4],[5,6,7,8],[9,10,11,12],[13,14,15,16]]]))
+p = LatticeParallel(grid=[4,4], pgrid=[1,2])
+
+@p.parallelize
+def f():
+    print('ciao')
+
+f()
