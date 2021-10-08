@@ -42,9 +42,10 @@ class LatticeBase():
 
 
 class Worker(Thread):
-    def __init__(self, f):
+    def __init__(self, func, platt):
       Thread.__init__(self)
-      self.f = f
+      self.func = func
+      self.platt = platt
     def run(self):
         self.f()
 
@@ -60,6 +61,8 @@ class LatticeParallel(LatticeBase):
         self.check_cpu_count()
         self.update_pidx()
 
+    def get_pvalue(self,value):
+        return value[self.pflat_idx]
        
     def moveforward(self,mu,step=1): 
         super().moveforward(mu,step)
@@ -80,16 +83,6 @@ class LatticeParallel(LatticeBase):
         return np.reshape(self.tensor_idx,newshape=[np.prod(self.pgrid)]+[int(a/self.pgrid[i]) for i,a in enumerate(self.tensor_idx.shape)])  
        
     #https://realpython.com/primer-on-python-decorators/
-    def parallelize(self,func):
-        def wrapper():
-            workers = [Worker(f=func) for _ in range(self.N_threads)]
-            for i,w in enumerate(workers):
-                w.start()
-                print('Thread {} started'.format(i))
-            for w in workers:
-                w.join()       
-            print("All Done")
-        return wrapper 
 
     def check_cpu_count(self):
         if self.N_threads>self.MAX_threads:
@@ -98,16 +91,32 @@ class LatticeParallel(LatticeBase):
             print('## Max threads available are {} '.format(self.MAX_threads))
             exit(1)
 
+def parallelize(platt, N_threads):
+    def inner(func):
+        def wrapper():
+            workers = [Worker(f=func,p=platt[i]) for i in range(N_threads)]
+            for i,w in enumerate(workers):
+                w.start()
+                print('Thread {} started'.format(i))
+            for w in workers:
+                w.join()       
+            print("All Done")
+        return wrapper 
+    return inner 
+
 class LatticeReal():
-    def __init__(self,lattice: LatticeBase):
+    def __init__(self,lattice: LatticeParallel):
         self.lattice = lattice 
         self.value = np.zeros(shape=(self.lattice.length,1),dtype=float)
+        self.pvalue = self.lattice.get_pvalue(value=self.value)
 
     def fill_value(self, n=0):
         if isinstance(n,Real):
             self.value[:] = n.value
+            self.pvalue = self.lattice.get_pvalue(value=self.value)
         elif isinstance(n, (float,int)):
-            self.value = n
+            self.value[:] = n
+            self.pvalue = self.lattice.get_pvalue(value=self.value)
         
     def __getitem__(self, idx:int):
             return self.value[idx,:]
@@ -115,11 +124,14 @@ class LatticeReal():
     def moveforward(self,mu,step=1): 
         self.lattice.moveforward(mu=mu,step=1)
         self.value = self.value[self.lattice.flat_idx]
+        self.pvalue = self.lattice.get_pvalue(value=self.value)
 
     def movebackward(self,mu,step=1): 
         self.lattice.movebackward(mu=mu,step=1)
         self.value = self.value[self.lattice.flat_idx]
+        self.pvalue = self.lattice.get_pvalue(value=self.value)
         
+    #@parallelize(platt=self.pvalue,N_threads=self.N_threads)
     def __add__(self,rhs):
         out = LatticeReal(lattice=self.lattice)
         if isinstance(rhs, LatticeReal):
@@ -157,7 +169,7 @@ class LatticeReal():
         return out
 
 class LatticeComplex():
-    def __init__(self,lattice: LatticeBase):
+    def __init__(self,lattice: LatticeParallel):
         self.lattice = lattice 
         self.value = np.zeros(shape=(self.lattice.length,1),dtype=complex)
 
@@ -215,7 +227,7 @@ class LatticeComplex():
         return out
 
 class LatticeRealMatrix(): 
-    def __init__(self, lattice: LatticeBase, N: int):
+    def __init__(self, lattice: LatticeParallel, N: int):
         self.N = N
         self.lattice = lattice 
         self.value = np.zeros(shape=(self.lattice.length,N,N),dtype=float)
@@ -294,7 +306,7 @@ class LatticeRealMatrix():
         return out
 
 class LatticeComplexMatrix(): 
-    def __init__(self, lattice: LatticeBase, N: int):
+    def __init__(self, lattice: LatticeParallel, N: int):
         self.N = N
         self.lattice = lattice 
         self.value = np.zeros(shape=(self.lattice.length,N,N),dtype=complex)
@@ -397,7 +409,7 @@ class LatticeComplexMatrix():
 
 
 class LatticeVectorReal(): 
-    def __init__(self, lattice: LatticeBase, Nd: int):
+    def __init__(self, lattice: LatticeParallel, Nd: int):
         self.Nd = Nd
         self.lattice = lattice 
         self.value = np.zeros(shape=(self.lattice.length,Nd),dtype=float)
@@ -453,7 +465,7 @@ class LatticeVectorReal():
 
 
 class LatticeVectorComplex(): 
-    def __init__(self, lattice: LatticeBase, Nd: int):
+    def __init__(self, lattice: LatticeParallel, Nd: int):
         self.Nd = Nd
         self.lattice = lattice 
         self.value = np.zeros(shape=(self.lattice.length,Nd),dtype=complex)
@@ -525,7 +537,7 @@ class LatticeVectorComplex():
 
 
 class LatticeVectorRealMatrix(): 
-    def __init__(self, lattice: LatticeBase, Nd: int, N:int):
+    def __init__(self, lattice: LatticeParallel, Nd: int, N:int):
         self.Nd = Nd
         self.N  = N
         self.lattice = lattice 
@@ -645,7 +657,7 @@ class LatticeVectorRealMatrix():
 
 
 class LatticeVectorComplexMatrix(): 
-    def __init__(self, lattice: LatticeBase, Nd: int, N:int):
+    def __init__(self, lattice: LatticeParallel, Nd: int, N:int):
         self.Nd = Nd
         self.N  = N
         self.lattice = lattice 
