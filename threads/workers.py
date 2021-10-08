@@ -11,16 +11,28 @@ class Worker():
         self.f
 
 class Parallel():
-    def __init__(self, pgrid, tensor_idx, halo = 1,worker = None):
+    def __init__(self, pgrid, tensor_idx, worker = None):
         self.pgrid  = pgrid
         self.N_threads = np.prod(self.pgrid)
         self.MAX_threads = cpu_count()
         self.check_cpu_count()
         self.worker = worker
-        self.halo = halo
         self.tensor_idx = tensor_idx
         self.dim = len(pgrid)
         self.ptensor_idx = self.local_grid()
+        self.flat_ptensor_idx = self.get_flat_ptensor_idx()
+        print(self.flat_ptensor_idx)
+
+    def get_flat_ptensor_idx(self):    
+        return np.array([np.ndarray.flatten(a) for a in self.ptensor_idx[:] ])
+        
+    #https://realpython.com/primer-on-python-decorators/
+    def parallelize(self,func):
+        def wrapper(self):
+            print('something')
+            func()
+            print('something')
+        return wrapper 
 
     def check_cpu_count(self):
         if self.N_threads>self.MAX_threads:
@@ -30,6 +42,9 @@ class Parallel():
             exit(1)
 
     def local_grid(self):
+        return np.reshape(self.tensor_idx,newshape=[np.prod(self.pgrid)]+[int(a/self.pgrid[i]) for i,a in enumerate(self.tensor_idx.shape)])  
+
+    def local_grid_DEPRECATED(self):
         if self.dim>=1:
             s1 = np.split(self.tensor_idx, self.pgrid[0], axis=0)
             out = s1
