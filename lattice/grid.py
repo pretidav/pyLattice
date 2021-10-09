@@ -47,7 +47,7 @@ class Worker(Thread):
       self.func = func
       self.platt = platt
     def run(self):
-        self.f()
+        self.func(latt=self.platt)
 
 class LatticeParallel(LatticeBase):
     def __init__(self,grid,pgrid):
@@ -94,7 +94,7 @@ class LatticeParallel(LatticeBase):
 def parallelize(platt, N_threads):
     def inner(func):
         def wrapper():
-            workers = [Worker(f=func,p=platt[i]) for i in range(N_threads)]
+            workers = [Worker(func=func,platt=platt[i]) for i in range(N_threads)]
             for i,w in enumerate(workers):
                 w.start()
                 print('Thread {} started'.format(i))
@@ -132,6 +132,7 @@ class LatticeReal():
         self.pvalue = self.lattice.get_pvalue(value=self.value)
         
     #@parallelize(platt=self.pvalue,N_threads=self.N_threads)
+
     def __add__(self,rhs):
         out = LatticeReal(lattice=self.lattice)
         if isinstance(rhs, LatticeReal):
