@@ -55,6 +55,11 @@ class LatticeParallel(LatticeBase):
     def get_pvalue(self,value):
         return value[self.pflat_idx]
        
+    # def get_value_from_pvalue(self,value,pvalue):
+    #     out = np.copy(value)
+    #     for n in range(pvalue.shape[0]):
+    #         out[self.pflat_idx[n]]=pvalue[n]
+
     def moveforward(self,mu,step=1): 
         super().moveforward(mu,step)
         self.update_pidx()
@@ -72,7 +77,8 @@ class LatticeParallel(LatticeBase):
 
     def local_grid(self):
         return np.reshape(self.tensor_idx,newshape=[np.prod(self.pgrid)]+[int(a/self.pgrid[i]) for i,a in enumerate(self.tensor_idx.shape)])  
-       
+
+
     #https://realpython.com/primer-on-python-decorators/
 
     def check_cpu_count(self):
@@ -82,30 +88,13 @@ class LatticeParallel(LatticeBase):
             print('## Max threads available are {} '.format(self.MAX_threads))
             exit(1)
 
-
 class Worker(Thread):
-    def __init__(self, target, pvalue, rhs):
+    def __init__(self, target, index):
       Thread.__init__(self)
       self.target = target
-      self.pvalue = pvalue
-      self.rhs    = rhs 
+      self.index = index
     def run(self):
-        self.target(rhs=self.rhs, pvalue=self.pvalue)
-
-def threaded(pvalue,N_threads):
-    def inner(fn):
-        def wrapper(rhs,pvalue):
-            workers = [Worker(target=fn,rhs=rhs, pvalue=pvalue[i]) for i in range(N_threads)]
-            for i,w in enumerate(workers):
-                w.start()
-                print('Thread {} started'.format(i))
-            for w in workers:
-                w.join()       
-            print("All Done")
-        return wrapper 
-    return inner 
-
-
+        self.target(i=self.index)
 
 class LatticeReal():
     def __init__(self,lattice: LatticeParallel):
@@ -134,19 +123,28 @@ class LatticeReal():
         self.value = self.value[self.lattice.flat_idx]
         self.pvalue = self.lattice.get_pvalue(value=self.value)
 
-    @threaded(pvalue=pvalue,N_threads=N_threads)
-    def __add__(self,rhs,pvalue=None):
+    def threading(self,fn):
+        threads = [Worker(target=fn,index=i) for i in range(self.lattice.N_threads)]
+        for t in threads:
+            t.start()
+        for t in threads: 
+            t.join()  
+
+    def __add__PARALLEL(self,rhs):
         out = LatticeReal(lattice=self.lattice)
-        if isinstance(rhs, LatticeReal):
-            assert(pvalue.shape==rhs.pvalue.shape)
-            out.pvalue = pvalue + rhs.pvalue
-        elif isinstance(rhs, Real):
-            out.pvalue = pvalue + rhs.pvalue
-        elif isinstance(rhs, (int,float)):
-            out.pvalue = pvalue + rhs    
+        def fn(i):
+            x = self.lattice.pflat_idx[i]
+            if isinstance(rhs, LatticeReal):
+                assert(self.value[x].shape==rhs.value[x].shape)
+                out.value[x] = self.value[x] + rhs.value[x]
+            elif isinstance(rhs, Real):
+                out.value[x] = self.value[x] + rhs.value[x]
+            elif isinstance(rhs, (int,float)):
+                out.value[x] = self.value[x] + rhs    
+        self.threading(fn=fn)
         return out
 
-    def __add__DEPRECATED(self,rhs):
+    def __add__(self,rhs):
         out = LatticeReal(lattice=self.lattice)
         if isinstance(rhs, LatticeReal):
             assert(self.value.shape==rhs.value.shape)

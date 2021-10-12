@@ -1,12 +1,5 @@
-from numpy import ndarray
 from lattice.grid import *
 tol = 10e-6
-# Grid = LatticeBase(grid=[4,4])
-# Grid.movebackward(mu=0)
-# print(Grid.tensor_idx)
-# print(list(Grid.tensor_idx.shape))
-
-# print(Grid.flat_idx)
 
 def test_moveforward():
     Grid = LatticeParallel(grid=[4,4],pgrid=[2,2])
@@ -21,20 +14,22 @@ def test_movebackward():
     assert(Grid.tensor_idx[1,1] == 9)
     assert(np.sum(Grid.flat_idx - [4,5,6,7,8,9,10,11,12,13,14,15,0,1,2,3])<tol)
     
-#def test_realfield():
-Grid = LatticeParallel(grid=[4,4],pgrid=[2,2])
-RealField = LatticeReal(lattice=Grid)
-RealField.fill_value(3)
-print(RealField.pvalue)
-# assert(np.sum(RealField.value-np.array([3]*4*4))<tol)    
-# X = LatticeReal(lattice=Grid)
-# X.value = np.array([0,1,1,0,0,1,0,0,1,0,0,1,0,0,1,1])
-# assert(np.sum(X.lattice.flat_idx - np.array([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]))<tol)
-# assert(np.sum(X.lattice.tensor_idx - np.array([[0,1,2,3],[4,5,6,7],[8,9,10,11],[12,13,14,15]]))<tol)
-# X.moveforward(mu=1)
-# assert(np.sum(X.value - np.array([0,0,1,1,0,0,1,0,1,1,0,0,1,0,0,1]))<tol)
-# assert(np.sum(X.lattice.flat_idx - np.array([3,0,1,2,7,4,5,6,11,8,9,10,15,12,13,14]))<tol)
-# assert(np.sum(X.lattice.tensor_idx - np.array([[3,0,1,2],[7,4,5,6],[11,8,9,10],[15,12,13,14]]))<tol)
+def test_realfield():
+    Grid = LatticeParallel(grid=[4,4],pgrid=[2,2])
+    RealField = LatticeReal(lattice=Grid)
+    RealField.fill_value(3)
+    RealField2 = LatticeReal(lattice=Grid)
+    RealField2.fill_value(2)
+    print(RealField.lattice.pflat_idx)
+    assert(np.sum(RealField.value-np.array([3]*4*4))<tol)    
+    X = LatticeReal(lattice=Grid)
+    X.value = np.array([0,1,1,0,0,1,0,0,1,0,0,1,0,0,1,1])
+    assert(np.sum(X.lattice.flat_idx - np.array([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]))<tol)
+    assert(np.sum(X.lattice.tensor_idx - np.array([[0,1,2,3],[4,5,6,7],[8,9,10,11],[12,13,14,15]]))<tol)
+    X.moveforward(mu=1)
+    assert(np.sum(X.value - np.array([0,0,1,1,0,0,1,0,1,1,0,0,1,0,0,1]))<tol)
+    assert(np.sum(X.lattice.flat_idx - np.array([3,0,1,2,7,4,5,6,11,8,9,10,15,12,13,14]))<tol)
+    assert(np.sum(X.lattice.tensor_idx - np.array([[3,0,1,2],[7,4,5,6],[11,8,9,10],[15,12,13,14]]))<tol)
 
 
 def test_complexfield():
