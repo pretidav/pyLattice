@@ -2,7 +2,7 @@ from lattice.grid import *
 
 
 #def test_realfield():
-Grid = LatticeParallel(grid=[200,200,200,10],pgrid=[1,1,1,1])
+Grid = LatticeParallel(grid=[200,200,200],pgrid=[2,2,2])
 RealField = LatticeReal(lattice=Grid)
 RealField.fill_value(3)
 RealField2 = LatticeReal(lattice=Grid)

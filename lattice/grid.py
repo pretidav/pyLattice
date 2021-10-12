@@ -1,6 +1,7 @@
 import numpy as np
 from multiprocessing import cpu_count
 from threading import Thread
+from multiprocessing import Process
 from linalg.tensors import *
 import time
 
@@ -130,7 +131,28 @@ class LatticeReal():
         for t in threads: 
             t.join()  
 
-    def __add__PARALLEL(self,rhs):
+    def parallel(self,fn):
+        procs = [Process(target=fn,args=(i,)) for i in range(self.lattice.N_threads)]
+        for p in procs:
+            p.start()
+        for p in procs: 
+            p.join()  
+
+    def __add__PROCESS(self,rhs):
+        out = LatticeReal(lattice=self.lattice)
+        def fn(i):
+            x = self.lattice.pflat_idx[i]
+            if isinstance(rhs, LatticeReal):
+                assert(self.value[x].shape==rhs.value[x].shape)
+                out.value[x] = self.value[x] + rhs.value[x]
+            elif isinstance(rhs, Real):
+                out.value[x] = self.value[x] + rhs.value[x]
+            elif isinstance(rhs, (int,float)):
+                out.value[x] = self.value[x] + rhs    
+        self.parallel(fn=fn)
+        return out
+
+    def __add__THREAD(self,rhs):
         out = LatticeReal(lattice=self.lattice)
         def fn(i):
             x = self.lattice.pflat_idx[i]
