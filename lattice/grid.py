@@ -40,15 +40,6 @@ class LatticeBase():
     def update_flat_idx(self):
         self.flat_idx = np.ndarray.flatten(self.tensor_idx)
 
-
-class Worker(Thread):
-    def __init__(self, func, platt):
-      Thread.__init__(self)
-      self.func = func
-      self.platt = platt
-    def run(self):
-        self.func(latt=self.platt)
-
 class LatticeParallel(LatticeBase):
     def __init__(self,grid,pgrid):
         super().__init__(grid)
@@ -91,10 +82,20 @@ class LatticeParallel(LatticeBase):
             print('## Max threads available are {} '.format(self.MAX_threads))
             exit(1)
 
-def parallelize(platt, N_threads):
-    def inner(func):
-        def wrapper():
-            workers = [Worker(func=func,platt=platt[i]) for i in range(N_threads)]
+
+class Worker(Thread):
+    def __init__(self, target, pvalue, rhs):
+      Thread.__init__(self)
+      self.target = target
+      self.pvalue = pvalue
+      self.rhs    = rhs 
+    def run(self):
+        self.target(rhs=self.rhs, pvalue=self.pvalue)
+
+def threaded(pvalue,N_threads):
+    def inner(fn):
+        def wrapper(rhs,pvalue):
+            workers = [Worker(target=fn,rhs=rhs, pvalue=pvalue[i]) for i in range(N_threads)]
             for i,w in enumerate(workers):
                 w.start()
                 print('Thread {} started'.format(i))
@@ -103,6 +104,8 @@ def parallelize(platt, N_threads):
             print("All Done")
         return wrapper 
     return inner 
+
+
 
 class LatticeReal():
     def __init__(self,lattice: LatticeParallel):
@@ -130,10 +133,20 @@ class LatticeReal():
         self.lattice.movebackward(mu=mu,step=1)
         self.value = self.value[self.lattice.flat_idx]
         self.pvalue = self.lattice.get_pvalue(value=self.value)
-        
-    #@parallelize(platt=self.pvalue,N_threads=self.N_threads)
 
-    def __add__(self,rhs):
+    @threaded(pvalue=pvalue,N_threads=N_threads)
+    def __add__(self,rhs,pvalue=None):
+        out = LatticeReal(lattice=self.lattice)
+        if isinstance(rhs, LatticeReal):
+            assert(pvalue.shape==rhs.pvalue.shape)
+            out.pvalue = pvalue + rhs.pvalue
+        elif isinstance(rhs, Real):
+            out.pvalue = pvalue + rhs.pvalue
+        elif isinstance(rhs, (int,float)):
+            out.pvalue = pvalue + rhs    
+        return out
+
+    def __add__DEPRECATED(self,rhs):
         out = LatticeReal(lattice=self.lattice)
         if isinstance(rhs, LatticeReal):
             assert(self.value.shape==rhs.value.shape)
