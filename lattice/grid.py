@@ -47,11 +47,11 @@ class LatticeParallel(LatticeBase):
         self.pgrid  = pgrid
         self.ptensor_idx = None 
         self.pflat_idx   = None
-
         self.N_threads = np.prod(self.pgrid)
         self.MAX_threads = cpu_count()
         self.check_cpu_count()
         self.update_pidx()
+        self.plength = [len(a) for a in self.pflat_idx] 
 
     def get_pvalue(self,value):
         return value[self.pflat_idx]
@@ -95,7 +95,7 @@ class Worker(Thread):
       self.target = target
       self.index = index
     def run(self):
-        self.target(i=self.index)
+        self.target(index=self.index)
 
 class LatticeReal():
     def __init__(self,lattice: LatticeParallel):
@@ -125,14 +125,14 @@ class LatticeReal():
         self.pvalue = self.lattice.get_pvalue(value=self.value)
 
     def threading(self,fn):
-        threads = [Worker(target=fn,index=i) for i in range(self.lattice.N_threads)]
+        threads = [Worker(target=fn,index=index) for index in range(self.lattice.N_threads)]
         for t in threads:
             t.start()
         for t in threads: 
             t.join()  
 
     def parallel(self,fn):
-        procs = [Process(target=fn,args=(i,)) for i in range(self.lattice.N_threads)]
+        procs = [Process(target=fn,args=(index,)) for index in range(self.lattice.N_threads)]
         for p in procs:
             p.start()
         for p in procs: 
@@ -140,8 +140,8 @@ class LatticeReal():
 
     def __add__PROCESS(self,rhs):
         out = LatticeReal(lattice=self.lattice)
-        def fn(i):
-            x = self.lattice.pflat_idx[i]
+        def fn(index):
+            x = self.lattice.pflat_idx[index]
             if isinstance(rhs, LatticeReal):
                 assert(self.value[x].shape==rhs.value[x].shape)
                 out.value[x] = self.value[x] + rhs.value[x]
@@ -154,8 +154,8 @@ class LatticeReal():
 
     def __add__THREAD(self,rhs):
         out = LatticeReal(lattice=self.lattice)
-        def fn(i):
-            x = self.lattice.pflat_idx[i]
+        def fn(index):
+            x = self.lattice.pflat_idx[index]
             if isinstance(rhs, LatticeReal):
                 assert(self.value[x].shape==rhs.value[x].shape)
                 out.value[x] = self.value[x] + rhs.value[x]
@@ -662,6 +662,83 @@ class LatticeVectorRealMatrix():
                     out.value[i,n] = self.value[i,n] - rhs
         return out
 
+    def threading(self,fn):
+        threads = [Worker(target=fn,index=index) for index in range(self.lattice.N_threads)]
+        for t in threads:
+            t.start()
+        for t in threads: 
+            t.join()  
+
+    def parallel(self,fn):
+        procs = [Process(target=fn,args=(index,)) for index in range(self.lattice.N_threads)]
+        for p in procs:
+            p.start()
+        for p in procs: 
+            p.join()  
+
+
+    # Best choice if proc>1
+    def __mul__AAA(self,rhs):
+        out = LatticeVectorRealMatrix(lattice=self.lattice, N=self.N, Nd=self.Nd)
+        def fn(index):
+            x = self.lattice.pflat_idx[index]
+            if isinstance(rhs, LatticeVectorRealMatrix):
+                assert(self.value.shape==rhs.value.shape)
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n] = np.dot(self.value[i,n] , rhs.value[i,n])
+            elif isinstance(rhs, LatticeRealMatrix):
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n] = np.dot(self.value[i,n] , rhs.value[i])
+            elif isinstance(rhs, RealMatrix):
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n] = np.dot(self.value[i,n] , rhs.value)
+            elif isinstance(rhs, Real):
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n] = self.value[i,n] * rhs.value
+            elif isinstance(rhs, (float,int)):
+                assert(self.value.shape==rhs.value.shape)
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n] = self.value[i,n] * rhs
+        self.parallel(fn=fn)
+        return out
+
+    # THIS IS CAPPED BY GIL -- NOT USABLE 
+    def __mul__THREADING(self,rhs):
+        out = LatticeVectorRealMatrix(lattice=self.lattice, N=self.N, Nd=self.Nd)
+        def fn(index):
+            x = self.lattice.pflat_idx[index]
+            if isinstance(rhs, LatticeVectorRealMatrix):
+                assert(self.value.shape==rhs.value.shape)
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n] = np.dot(self.value[i,n] , rhs.value[i,n])
+            elif isinstance(rhs, LatticeRealMatrix):
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n] = np.dot(self.value[i,n] , rhs.value[i])
+            elif isinstance(rhs, RealMatrix):
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n] = np.dot(self.value[i,n] , rhs.value)
+            elif isinstance(rhs, Real):
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n] = self.value[i,n] * rhs.value
+            elif isinstance(rhs, (float,int)):
+                assert(self.value.shape==rhs.value.shape)
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n] = self.value[i,n] * rhs
+        self.threading(fn=fn)
+        return out
+
+
+    # SLOWER THAN multiproc if proc>1
     def __mul__(self,rhs):
         out = LatticeVectorRealMatrix(lattice=self.lattice, N=self.N, Nd=self.Nd)
         if isinstance(rhs, LatticeVectorRealMatrix):
