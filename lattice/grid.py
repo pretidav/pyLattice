@@ -1,7 +1,8 @@
 import numpy as np
-from multiprocessing import cpu_count
+from multiprocessing import cpu_count, Manager
 from threading import Thread
 from multiprocessing import Process
+#from queue import Queue
 from linalg.tensors import *
 import time
 
@@ -49,7 +50,7 @@ class LatticeParallel(LatticeBase):
         self.pflat_idx   = None
         self.N_threads = np.prod(self.pgrid)
         self.MAX_threads = cpu_count()
-        self.check_cpu_count()
+        #self.check_cpu_count()
         self.update_pidx()
         self.plength = [len(a) for a in self.pflat_idx] 
 
@@ -676,9 +677,51 @@ class LatticeVectorRealMatrix():
         for p in procs: 
             p.join()  
 
+    def Qparallel(self,fn):
+        Q = Manager().Queue(maxsize=0)
+        for i in range(self.lattice.N_threads): 
+            Q.put(i) 
+        for i in range(self.lattice.MAX_threads):
+            process = Process(target=fn, args=[Q]) 
+            process.start()
+        Q.join()
+
+
+
+    def __mul__Q(self,rhs):
+        out = LatticeVectorRealMatrix(lattice=self.lattice, N=self.N, Nd=self.Nd)
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                x = self.lattice.pflat_idx[index]
+                if isinstance(rhs, LatticeVectorRealMatrix):
+                    assert(self.value.shape==rhs.value.shape)
+                    for i in out.lattice.pflat_idx[index]:
+                        for n in range(self.Nd):
+                            out.value[i,n] = np.dot(self.value[i,n] , rhs.value[i,n])
+                elif isinstance(rhs, LatticeRealMatrix):
+                    for i in out.lattice.pflat_idx[index]:
+                        for n in range(self.Nd):
+                            out.value[i,n] = np.dot(self.value[i,n] , rhs.value[i])
+                elif isinstance(rhs, RealMatrix):
+                    for i in out.lattice.pflat_idx[index]:
+                        for n in range(self.Nd):
+                            out.value[i,n] = np.dot(self.value[i,n] , rhs.value)
+                elif isinstance(rhs, Real):
+                    for i in out.lattice.pflat_idx[index]:
+                        for n in range(self.Nd):
+                            out.value[i,n] = self.value[i,n] * rhs.value
+                elif isinstance(rhs, (float,int)):
+                    assert(self.value.shape==rhs.value.shape)
+                    for i in out.lattice.pflat_idx[index]:
+                        for n in range(self.Nd):
+                            out.value[i,n] = self.value[i,n] * rhs
+                q.task_done()
+        self.Qparallel(fn=fn)
+        return out
 
     # Best choice if proc>1
-    def __mul__AAA(self,rhs):
+    def __mul__Proc(self,rhs):
         out = LatticeVectorRealMatrix(lattice=self.lattice, N=self.N, Nd=self.Nd)
         def fn(index):
             x = self.lattice.pflat_idx[index]
@@ -708,7 +751,7 @@ class LatticeVectorRealMatrix():
         return out
 
     # THIS IS CAPPED BY GIL -- NOT USABLE 
-    def __mul__THREADING(self,rhs):
+    def __mul__(self,rhs):
         out = LatticeVectorRealMatrix(lattice=self.lattice, N=self.N, Nd=self.Nd)
         def fn(index):
             x = self.lattice.pflat_idx[index]
@@ -739,7 +782,7 @@ class LatticeVectorRealMatrix():
 
 
     # SLOWER THAN multiproc if proc>1
-    def __mul__(self,rhs):
+    def __mul__NAIVE(self,rhs):
         out = LatticeVectorRealMatrix(lattice=self.lattice, N=self.N, Nd=self.Nd)
         if isinstance(rhs, LatticeVectorRealMatrix):
             assert(self.value.shape==rhs.value.shape)
