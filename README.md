@@ -13,4 +13,4 @@ Intel(R) Core(TM) i5-8365U CPU @ 1.60GHz
 Thread(s) per core:  2
 Core(s) per socket:  4
 
-![alt text](https://github.com/pretidav/pyLattice/raw/parallel/fig/plot.png)
+![alt text](https://github.com/pretidav/pyLattice/raw/parallel/fig/perf.png)
