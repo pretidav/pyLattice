@@ -1,5 +1,5 @@
 import numpy as np
-from multiprocessing import cpu_count, Manager
+from multiprocessing import cpu_count, Manager, Array
 from threading import Thread
 from multiprocessing import Process
 #from queue import Queue
@@ -57,10 +57,14 @@ class LatticeParallel(LatticeBase):
     def get_pvalue(self,value):
         return value[self.pflat_idx]
        
-    # def get_value_from_pvalue(self,value,pvalue):
-    #     out = np.copy(value)
-    #     for n in range(pvalue.shape[0]):
-    #         out[self.pflat_idx[n]]=pvalue[n]
+    def Qparallel(self,fn):
+        Q = Manager().Queue(maxsize=0)
+        for i in range(self.N_threads): 
+            Q.put(i) 
+        for i in range(min(self.MAX_threads,self.N_threads)):
+            process = Process(target=fn, args=[Q]) 
+            process.start()
+        Q.join()
 
     def moveforward(self,mu,step=1): 
         super().moveforward(mu,step)
@@ -90,14 +94,6 @@ class LatticeParallel(LatticeBase):
             print('## Max threads available are {} '.format(self.MAX_threads))
             exit(1)
 
-class Worker(Thread):
-    def __init__(self, target, index):
-      Thread.__init__(self)
-      self.target = target
-      self.index = index
-    def run(self):
-        self.target(index=self.index)
-
 class LatticeReal():
     def __init__(self,lattice: LatticeParallel):
         self.lattice = lattice 
@@ -125,48 +121,6 @@ class LatticeReal():
         self.value = self.value[self.lattice.flat_idx]
         self.pvalue = self.lattice.get_pvalue(value=self.value)
 
-    def threading(self,fn):
-        threads = [Worker(target=fn,index=index) for index in range(self.lattice.N_threads)]
-        for t in threads:
-            t.start()
-        for t in threads: 
-            t.join()  
-
-    def parallel(self,fn):
-        procs = [Process(target=fn,args=(index,)) for index in range(self.lattice.N_threads)]
-        for p in procs:
-            p.start()
-        for p in procs: 
-            p.join()  
-
-    def __add__PROCESS(self,rhs):
-        out = LatticeReal(lattice=self.lattice)
-        def fn(index):
-            x = self.lattice.pflat_idx[index]
-            if isinstance(rhs, LatticeReal):
-                assert(self.value[x].shape==rhs.value[x].shape)
-                out.value[x] = self.value[x] + rhs.value[x]
-            elif isinstance(rhs, Real):
-                out.value[x] = self.value[x] + rhs.value[x]
-            elif isinstance(rhs, (int,float)):
-                out.value[x] = self.value[x] + rhs    
-        self.parallel(fn=fn)
-        return out
-
-    def __add__THREAD(self,rhs):
-        out = LatticeReal(lattice=self.lattice)
-        def fn(index):
-            x = self.lattice.pflat_idx[index]
-            if isinstance(rhs, LatticeReal):
-                assert(self.value[x].shape==rhs.value[x].shape)
-                out.value[x] = self.value[x] + rhs.value[x]
-            elif isinstance(rhs, Real):
-                out.value[x] = self.value[x] + rhs.value[x]
-            elif isinstance(rhs, (int,float)):
-                out.value[x] = self.value[x] + rhs    
-        self.threading(fn=fn)
-        return out
-
     def __add__(self,rhs):
         out = LatticeReal(lattice=self.lattice)
         if isinstance(rhs, LatticeReal):
@@ -191,16 +145,21 @@ class LatticeReal():
 
     def __mul__(self,rhs):
         out = LatticeReal(lattice=self.lattice)
-        if isinstance(rhs, LatticeReal):
-            assert(self.value.shape==rhs.value.shape)
-            for i in range(out.lattice.length):
-                out.value[i] = self.value[i] * rhs.value[i]
-        elif isinstance(rhs, Real):
-            for i in range(out.lattice.length):
-                out.value[i] = self.value[i] * rhs.value
-        elif isinstance(rhs, (int,float)):
-            for i in range(out.lattice.length):
-                out.value[i] = self.value[i] * rhs
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                if isinstance(rhs, LatticeReal):
+                    assert(self.value.shape==rhs.value.shape)
+                    for i in out.lattice.pflat_idx[index]:
+                        out.value[i] = self.value[i] * rhs.value[i]
+                elif isinstance(rhs, Real):
+                    for i in out.lattice.pflat_idx[index]:
+                        out.value[i] = self.value[i] * rhs.value
+                elif isinstance(rhs, (int,float)):
+                    for i in out.lattice.pflat_idx[index]:
+                        out.value[i] = self.value[i] * rhs
+            q.task_done()
+        self.lattice.Qparallel(fn)
         return out
 
 class LatticeComplex():
@@ -249,16 +208,21 @@ class LatticeComplex():
 
     def __mul__(self,rhs):
         out = LatticeComplex(lattice=self.lattice)
-        if isinstance(rhs, (LatticeComplex,LatticeReal)):
-            assert(self.value.shape==rhs.value.shape)
-            for i in range(out.lattice.length):
-                out.value[i] = self.value[i] * rhs.value[i]
-        elif isinstance(rhs, (Complex,Real)):
-            for i in range(out.lattice.length):
-                out.value[i] = self.value[i] * rhs.value
-        elif isinstance(rhs, (int,float,complex)):
-            for i in range(out.lattice.length):
-                out.value[i] = self.value[i] * rhs
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                if isinstance(rhs, (LatticeComplex,LatticeReal)):
+                    assert(self.value.shape==rhs.value.shape)
+                    for i in out.lattice.pflat_idx[index]:
+                        out.value[i] = self.value[i] * rhs.value[i]
+                elif isinstance(rhs, (Complex,Real)):
+                    for i in out.lattice.pflat_idx[index]:
+                        out.value[i] = self.value[i] * rhs.value
+                elif isinstance(rhs, (int,float,complex)):
+                    for i in out.lattice.pflat_idx[index]:
+                        out.value[i] = self.value[i] * rhs
+            q.task_done()
+        self.lattice.Qparallel(fn)
         return out
 
 class LatticeRealMatrix(): 
@@ -284,26 +248,59 @@ class LatticeRealMatrix():
     
     def transpose(self):
         out = LatticeRealMatrix(lattice=self.lattice, N=self.N)
-        for i in range(self.lattice.length):
-            out.value[i]=np.transpose(self.value[i,:,:])
+        global out_value 
+        out_value = Array('f',out.value.reshape(-1),lock=False)
+
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                for i in out.lattice.pflat_idx[index]:
+                    out_value[i]=np.transpose(self.value[i,:,:]).reshape(-1)
+            q.task_done()
+        self.lattice.Qparallel(fn)
+        #out.value = np.frombuffer(out_value.reshape(self.lattice.length,self.N),dtype='float32')
+        print(out.value)
         return out 
 
     def trace(self):
         out = LatticeReal(lattice=self.lattice)
-        for i in range(self.lattice.length):
-            out.value[i]=np.trace(self.value[i,:,:])
+        global out_value 
+        out_value = Array('f',out.value,lock=False)
+        e
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                for i in out.lattice.pflat_idx[index]:
+                    out_value[i]=np.trace(self.value[i,:,:])
+            q.task_done()
+        self.lattice.Qparallel(fn)
+        #out.value = np.frombuffer(out_value,dtype='float32')
         return out 
 
     def det(self):
         out = LatticeReal(lattice=self.lattice)
-        for i in range(self.lattice.length):
-            out.value[i]=np.linalg.det(self.value[i,:,:])
+        global out_value 
+        out_value = Array('f',out.value,lock=False)
+
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                for i in out.lattice.pflat_idx[index]:
+                    out_value[i]=np.linalg.det(self.value[i,:,:])
+            q.task_done()
+        self.lattice.Qparallel(fn)
+        out.value = np.frombuffer(out_value,dtype='float32')
         return out 
 
     def inv(self):
         out = LatticeRealMatrix(lattice=self.lattice, N=self.N)
-        for i in range(self.lattice.length):
-            out.value[i]=np.linalg.inv(self.value[i,:,:])
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                for i in out.lattice.pflat_idx[index]:
+                    out.value[i]=np.linalg.inv(self.value[i,:,:])
+            q.task_done()
+        self.lattice.Qparallel(fn)
         return out 
 
     def __add__(self,rhs):
@@ -328,16 +325,21 @@ class LatticeRealMatrix():
 
     def __mul__(self,rhs):
         out = LatticeRealMatrix(lattice=self.lattice, N=self.N)
-        if isinstance(rhs, LatticeRealMatrix):
-            assert(self.value.shape==rhs.value.shape)
-            for i in range(out.lattice.length):
-                out.value[i] = np.dot(self.value[i] , rhs.value[i])
-        elif isinstance(rhs, RealMatrix):
-            assert(self.value[0].shape==rhs.value.shape)
-            for i in range(out.lattice.length):
-                out.value[i] = np.dot(self.value[i], rhs.value)
-        elif isinstance(rhs, Real):
-            out.value = self.value * rhs.value
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                if isinstance(rhs, LatticeRealMatrix):
+                    assert(self.value.shape==rhs.value.shape)
+                    for i in out.lattice.pflat_idx[index]:
+                        out.value[i] = np.dot(self.value[i] , rhs.value[i])
+                elif isinstance(rhs, RealMatrix):
+                    assert(self.value[0].shape==rhs.value.shape)
+                    for i in out.lattice.pflat_idx[index]:
+                        out.value[i] = np.dot(self.value[i], rhs.value)
+                elif isinstance(rhs, Real):
+                    out.value = self.value * rhs.value
+            q.task_done()
+        self.lattice.Qparallel(fn)
         return out
 
 class LatticeComplexMatrix(): 
@@ -466,8 +468,13 @@ class LatticeVectorReal():
     
     def transpose(self):
         out = LatticeVectorReal(lattice=self.lattice, Nd=self.Nd)
-        for i in range(self.lattice.length):
-            out.value[i]=np.transpose(self.value[i,:])
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                for i in out.lattice.pflat_idx[index]:
+                    out.value[i]=np.transpose(self.value[i,:])
+            q.task_done()
+        self.lattice.Qparallel(fn)
         return out 
 
     def __add__(self,rhs):
@@ -522,8 +529,13 @@ class LatticeVectorComplex():
     
     def transpose(self):
         out = LatticeVectorComplex(lattice=self.lattice, Nd=self.Nd)
-        for i in range(self.lattice.length):
-            out.value[i]=np.transpose(self.value[i,:])
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                for i in out.lattice.pflat_idx[index]:
+                    out.value[i]=np.transpose(self.value[i,:])
+            q.task_done()
+        self.lattice.Qparallel(fn)
         return out 
 
     def __add__(self,rhs):
@@ -595,30 +607,50 @@ class LatticeVectorRealMatrix():
     
     def transpose(self):
         out = LatticeVectorRealMatrix(lattice=self.lattice, N=self.N, Nd=self.Nd)
-        for i in range(self.lattice.length):
-            for n in range(self.Nd):
-                out.value[i,n]=np.transpose(self.value[i,n,:,:])
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n]=np.transpose(self.value[i,n,:,:])
+            q.task_done()
+        self.lattice.Qparallel(fn)
         return out 
 
     def trace(self):
         out = LatticeVectorReal(lattice=self.lattice,Nd=self.Nd)
-        for i in range(self.lattice.length):
-            for n in range(self.Nd):
-                out.value[i,n]=np.trace(self.value[i,n,:,:])
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n]=np.trace(self.value[i,n,:,:])
+            q.task_done()
+        self.lattice.Qparallel(fn)
         return out 
 
     def det(self):
         out = LatticeVectorReal(lattice=self.lattice,Nd=self.Nd)
-        for i in range(self.lattice.length):
-            for n in range(self.Nd):
-                out.value[i,n]=np.linalg.det(self.value[i,n,:,:])
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n]=np.linalg.det(self.value[i,n,:,:])
+            q.task_done()
+        self.lattice.Qparallel(fn)
         return out 
 
     def inv(self):
         out = LatticeVectorRealMatrix(lattice=self.lattice, N=self.N, Nd=self.Nd)
-        for i in range(self.lattice.length):
-            for n in range(self.Nd):
-                out.value[i,n]=np.linalg.inv(self.value[i,n,:,:])
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n]=np.linalg.inv(self.value[i,n,:,:])
+            q.task_done()
+        self.lattice.Qparallel(fn)
         return out 
 
     def __add__(self,rhs):
@@ -663,37 +695,11 @@ class LatticeVectorRealMatrix():
                     out.value[i,n] = self.value[i,n] - rhs
         return out
 
-    def threading(self,fn):
-        threads = [Worker(target=fn,index=index) for index in range(self.lattice.N_threads)]
-        for t in threads:
-            t.start()
-        for t in threads: 
-            t.join()  
-
-    def parallel(self,fn):
-        procs = [Process(target=fn,args=(index,)) for index in range(self.lattice.N_threads)]
-        for p in procs:
-            p.start()
-        for p in procs: 
-            p.join()  
-
-    def Qparallel(self,fn):
-        Q = Manager().Queue(maxsize=0)
-        for i in range(self.lattice.N_threads): 
-            Q.put(i) 
-        for i in range(self.lattice.MAX_threads):
-            process = Process(target=fn, args=[Q]) 
-            process.start()
-        Q.join()
-
-
-
-    def __mul__Q(self,rhs):
+    def __mul__(self,rhs):
         out = LatticeVectorRealMatrix(lattice=self.lattice, N=self.N, Nd=self.Nd)
         def fn(q):
             while not q.empty():
                 index = q.get()
-                x = self.lattice.pflat_idx[index]
                 if isinstance(rhs, LatticeVectorRealMatrix):
                     assert(self.value.shape==rhs.value.shape)
                     for i in out.lattice.pflat_idx[index]:
@@ -717,98 +723,8 @@ class LatticeVectorRealMatrix():
                         for n in range(self.Nd):
                             out.value[i,n] = self.value[i,n] * rhs
                 q.task_done()
-        self.Qparallel(fn=fn)
+        self.lattice.Qparallel(fn=fn)
         return out
-
-    # Best choice if proc>1
-    def __mul__Proc(self,rhs):
-        out = LatticeVectorRealMatrix(lattice=self.lattice, N=self.N, Nd=self.Nd)
-        def fn(index):
-            x = self.lattice.pflat_idx[index]
-            if isinstance(rhs, LatticeVectorRealMatrix):
-                assert(self.value.shape==rhs.value.shape)
-                for i in out.lattice.pflat_idx[index]:
-                    for n in range(self.Nd):
-                        out.value[i,n] = np.dot(self.value[i,n] , rhs.value[i,n])
-            elif isinstance(rhs, LatticeRealMatrix):
-                for i in out.lattice.pflat_idx[index]:
-                    for n in range(self.Nd):
-                        out.value[i,n] = np.dot(self.value[i,n] , rhs.value[i])
-            elif isinstance(rhs, RealMatrix):
-                for i in out.lattice.pflat_idx[index]:
-                    for n in range(self.Nd):
-                        out.value[i,n] = np.dot(self.value[i,n] , rhs.value)
-            elif isinstance(rhs, Real):
-                for i in out.lattice.pflat_idx[index]:
-                    for n in range(self.Nd):
-                        out.value[i,n] = self.value[i,n] * rhs.value
-            elif isinstance(rhs, (float,int)):
-                assert(self.value.shape==rhs.value.shape)
-                for i in out.lattice.pflat_idx[index]:
-                    for n in range(self.Nd):
-                        out.value[i,n] = self.value[i,n] * rhs
-        self.parallel(fn=fn)
-        return out
-
-    # THIS IS CAPPED BY GIL -- NOT USABLE 
-    def __mul__(self,rhs):
-        out = LatticeVectorRealMatrix(lattice=self.lattice, N=self.N, Nd=self.Nd)
-        def fn(index):
-            x = self.lattice.pflat_idx[index]
-            if isinstance(rhs, LatticeVectorRealMatrix):
-                assert(self.value.shape==rhs.value.shape)
-                for i in out.lattice.pflat_idx[index]:
-                    for n in range(self.Nd):
-                        out.value[i,n] = np.dot(self.value[i,n] , rhs.value[i,n])
-            elif isinstance(rhs, LatticeRealMatrix):
-                for i in out.lattice.pflat_idx[index]:
-                    for n in range(self.Nd):
-                        out.value[i,n] = np.dot(self.value[i,n] , rhs.value[i])
-            elif isinstance(rhs, RealMatrix):
-                for i in out.lattice.pflat_idx[index]:
-                    for n in range(self.Nd):
-                        out.value[i,n] = np.dot(self.value[i,n] , rhs.value)
-            elif isinstance(rhs, Real):
-                for i in out.lattice.pflat_idx[index]:
-                    for n in range(self.Nd):
-                        out.value[i,n] = self.value[i,n] * rhs.value
-            elif isinstance(rhs, (float,int)):
-                assert(self.value.shape==rhs.value.shape)
-                for i in out.lattice.pflat_idx[index]:
-                    for n in range(self.Nd):
-                        out.value[i,n] = self.value[i,n] * rhs
-        self.threading(fn=fn)
-        return out
-
-
-    # SLOWER THAN multiproc if proc>1
-    def __mul__NAIVE(self,rhs):
-        out = LatticeVectorRealMatrix(lattice=self.lattice, N=self.N, Nd=self.Nd)
-        if isinstance(rhs, LatticeVectorRealMatrix):
-            assert(self.value.shape==rhs.value.shape)
-            for i in range(out.lattice.length):
-                for n in range(self.Nd):
-                    out.value[i,n] = np.dot(self.value[i,n] , rhs.value[i,n])
-        elif isinstance(rhs, LatticeRealMatrix):
-            for i in range(out.lattice.length):
-                for n in range(self.Nd):
-                    out.value[i,n] = np.dot(self.value[i,n] , rhs.value[i])
-        elif isinstance(rhs, RealMatrix):
-            for i in range(out.lattice.length):
-                for n in range(self.Nd):
-                    out.value[i,n] = np.dot(self.value[i,n] , rhs.value)
-        elif isinstance(rhs, Real):
-            for i in range(out.lattice.length):
-                for n in range(self.Nd):
-                    out.value[i,n] = self.value[i,n] * rhs.value
-        elif isinstance(rhs, (float,int)):
-            assert(self.value.shape==rhs.value.shape)
-            for i in range(out.lattice.length):
-                for n in range(self.Nd):
-                    out.value[i,n] = self.value[i,n] * rhs
-        return out
-
-
 
 class LatticeVectorComplexMatrix(): 
     def __init__(self, lattice: LatticeParallel, Nd: int, N:int):
@@ -834,37 +750,62 @@ class LatticeVectorComplexMatrix():
     
     def transpose(self):
         out = LatticeVectorComplexMatrix(lattice=self.lattice, N=self.N, Nd=self.Nd)
-        for i in range(self.lattice.length):
-            for n in range(self.Nd):
-                out.value[i,n]=np.transpose(self.value[i,n,:,:])
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n]=np.transpose(self.value[i,n,:,:])
+            q.task_done()
+        self.lattice.Qparallel(fn)
         return out 
 
     def trace(self):
         out = LatticeVectorComplex(lattice=self.lattice,Nd=self.Nd)
-        for i in range(self.lattice.length):
-            for n in range(self.Nd):
-                out.value[i,n]=np.trace(self.value[i,n,:,:])
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n]=np.trace(self.value[i,n,:,:])
+            q.task_done()
+        self.lattice.Qparallel(fn)
         return out 
 
     def det(self):
         out = LatticeVectorComplex(lattice=self.lattice,Nd=self.Nd)
-        for i in range(self.lattice.length):
-            for n in range(self.Nd):
-                out.value[i,n]=np.linalg.det(self.value[i,n,:,:])
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n]=np.linalg.det(self.value[i,n,:,:])
+            q.task_done()
+        self.lattice.Qparallel(fn)
         return out 
 
     def inv(self):
         out = LatticeVectorComplexMatrix(lattice=self.lattice, N=self.N, Nd=self.Nd)
-        for i in range(self.lattice.length):
-            for n in range(self.Nd):
-                out.value[i,n]=np.linalg.inv(self.value[i,n,:,:])
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n]=np.linalg.inv(self.value[i,n,:,:])
+            q.task_done()
+        self.lattice.Qparallel(fn)
         return out 
 
     def conj(self):
         out = LatticeVectorComplexMatrix(lattice=self.lattice, N=self.N, Nd=self.Nd)
-        for i in range(self.lattice.length):
-            for n in range(self.Nd):
-                out.value[i,n]=np.conj(self.value[i,n,:,:])
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                for i in out.lattice.pflat_idx[index]:
+                    for n in range(self.Nd):
+                        out.value[i,n]=np.conj(self.value[i,n,:,:])
+            q.task_done()
+        self.lattice.Qparallel(fn)
         return out 
 
     def adj(self):
@@ -926,26 +867,31 @@ class LatticeVectorComplexMatrix():
 
     def __mul__(self,rhs):
         out = LatticeVectorComplexMatrix(lattice=self.lattice, N=self.N, Nd=self.Nd)
-        if isinstance(rhs, (LatticeVectorComplexMatrix,LatticeVectorRealMatrix)):
-            assert(self.value.shape==rhs.value.shape)
-            for i in range(out.lattice.length):
-                for n in range(self.Nd):
-                    out.value[i,n] = np.dot(self.value[i,n] , rhs.value[i,n])
-        elif isinstance(rhs, (LatticeRealMatrix,LatticeComplexMatrix)):
-            for i in range(out.lattice.length):
-                for n in range(self.Nd):
-                    out.value[i,n] = np.dot(self.value[i,n] , rhs.value[i])
-        elif isinstance(rhs, (ComplexMatrix,RealMatrix)):
-            for i in range(out.lattice.length):
-                for n in range(self.Nd):
-                    out.value[i,n] = np.dot(self.value[i,n] , rhs.value)
-        elif isinstance(rhs, (Complex,Real)):
-            for i in range(out.lattice.length):
-                for n in range(self.Nd):
-                    out.value[i,n] = self.value[i,n] * rhs.value
-        elif isinstance(rhs, (float,int,complex)):
-            assert(self.value.shape==rhs.value.shape)
-            for i in range(out.lattice.length):
-                for n in range(self.Nd):
-                    out.value[i,n] = self.value[i,n] * rhs
+        def fn(q):
+            while not q.empty():
+                index = q.get()
+                if isinstance(rhs, (LatticeVectorComplexMatrix,LatticeVectorRealMatrix)):
+                    assert(self.value.shape==rhs.value.shape)
+                    for i in out.lattice.pflat_idx[index]:
+                        for n in range(self.Nd):
+                            out.value[i,n] = np.dot(self.value[i,n] , rhs.value[i,n])
+                elif isinstance(rhs, (LatticeRealMatrix,LatticeComplexMatrix)):
+                    for i in out.lattice.pflat_idx[index]:
+                        for n in range(self.Nd):
+                            out.value[i,n] = np.dot(self.value[i,n] , rhs.value[i])
+                elif isinstance(rhs, (ComplexMatrix,RealMatrix)):
+                    for i in out.lattice.pflat_idx[index]:
+                        for n in range(self.Nd):
+                            out.value[i,n] = np.dot(self.value[i,n] , rhs.value)
+                elif isinstance(rhs, (Complex,Real)):
+                    for i in out.lattice.pflat_idx[index]:
+                        for n in range(self.Nd):
+                            out.value[i,n] = self.value[i,n] * rhs.value
+                elif isinstance(rhs, (float,int,complex)):
+                    assert(self.value.shape==rhs.value.shape)
+                    for i in out.lattice.pflat_idx[index]:
+                        for n in range(self.Nd):
+                            out.value[i,n] = self.value[i,n] * rhs
+            q.task_done()
+        self.lattice.Qparallel(fn)
         return out
