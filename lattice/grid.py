@@ -4,6 +4,7 @@ from threading import Thread
 from multiprocessing import Process
 #from queue import Queue
 from linalg.tensors import *
+import ctypes
 import time
 
 class LatticeBase():
@@ -50,7 +51,7 @@ class LatticeParallel(LatticeBase):
         self.pflat_idx   = None
         self.N_threads = np.prod(self.pgrid)
         self.MAX_threads = cpu_count()
-        #self.check_cpu_count()
+        self.check_cpu_count()
         self.update_pidx()
         self.plength = [len(a) for a in self.pflat_idx] 
 
@@ -84,22 +85,17 @@ class LatticeParallel(LatticeBase):
     def local_grid(self):
         return np.reshape(self.tensor_idx,newshape=[np.prod(self.pgrid)]+[int(a/self.pgrid[i]) for i,a in enumerate(self.tensor_idx.shape)])  
 
-
-    #https://realpython.com/primer-on-python-decorators/
-
     def check_cpu_count(self):
         if self.N_threads>self.MAX_threads:
-            print('## ERROR ##')
+            print('## WARNING ##')
             print('## parallelization grid {} requires {} processes'.format(self.pgrid,self.N_threads))
             print('## Max threads available are {} '.format(self.MAX_threads))
-            exit(1)
-
+        
 class LatticeReal():
     def __init__(self,lattice: LatticeParallel):
         self.lattice = lattice 
         self.value = np.zeros(shape=(self.lattice.length,1),dtype=float)
-        self.pvalue = self.lattice.get_pvalue(value=self.value)
-
+       
     def fill_value(self, n=0):
         if isinstance(n,Real):
             self.value[:] = n.value
@@ -114,12 +110,10 @@ class LatticeReal():
     def moveforward(self,mu,step=1): 
         self.lattice.moveforward(mu=mu,step=1)
         self.value = self.value[self.lattice.flat_idx]
-        self.pvalue = self.lattice.get_pvalue(value=self.value)
 
     def movebackward(self,mu,step=1): 
         self.lattice.movebackward(mu=mu,step=1)
         self.value = self.value[self.lattice.flat_idx]
-        self.pvalue = self.lattice.get_pvalue(value=self.value)
 
     def __add__(self,rhs):
         out = LatticeReal(lattice=self.lattice)
@@ -145,21 +139,24 @@ class LatticeReal():
 
     def __mul__(self,rhs):
         out = LatticeReal(lattice=self.lattice)
+        global out_value 
+        out_value = Array('f',out.value,lock=False)
         def fn(q):
             while not q.empty():
                 index = q.get()
                 if isinstance(rhs, LatticeReal):
                     assert(self.value.shape==rhs.value.shape)
                     for i in out.lattice.pflat_idx[index]:
-                        out.value[i] = self.value[i] * rhs.value[i]
+                        out_value[i] = self.value[i] * rhs.value[i]
                 elif isinstance(rhs, Real):
                     for i in out.lattice.pflat_idx[index]:
-                        out.value[i] = self.value[i] * rhs.value
+                        out_value[i] = self.value[i] * rhs.value
                 elif isinstance(rhs, (int,float)):
                     for i in out.lattice.pflat_idx[index]:
-                        out.value[i] = self.value[i] * rhs
+                        out_value[i] = self.value[i] * rhs
             q.task_done()
         self.lattice.Qparallel(fn)
+        out.value = np.frombuffer(out_value,dtype='float32')
         return out
 
 class LatticeComplex():
@@ -208,6 +205,9 @@ class LatticeComplex():
 
     def __mul__(self,rhs):
         out = LatticeComplex(lattice=self.lattice)
+        global out_value 
+        # need to split Real and Im parts..
+        out_value = Array(size_or_initializer=out.value,typecode_or_type=np.ctypeslib.as_ctypes(out.value[0]),lock=False)
         def fn(q):
             while not q.empty():
                 index = q.get()
