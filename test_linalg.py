@@ -23,8 +23,9 @@ Bc.value = np.array([[2,1+7j],[0,2+9j]],dtype=complex)
 
 #Real tests 
 def test_sum_real_real():
-    assert( (a+b).value  ==  7)
+    assert( (a+b).value  ==  [7.])
 def test_diff_real_real():
+    print((a-b).value)
     assert( (a-b).value  ==  13)
 def test_mul_real_real():
     assert( (a*b).value  ==  -30)

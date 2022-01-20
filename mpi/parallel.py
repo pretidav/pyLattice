@@ -6,7 +6,7 @@ def pprint(comm,msg):
         print(msg)
 
 class CartesianComm():
-    def __init__(self, mpigrid, periodicity=False):
+    def __init__(self, mpigrid, periodicity=True):
         self.comm, self.size, self.rank = self.create_comm()
         self.mpigrid = mpigrid
         self.mpidim = len(self.mpigrid)
@@ -47,5 +47,5 @@ class CartesianComm():
 if __name__=='__main__':
     CC = CartesianComm(mpigrid=[2,2])
     print(CC.mpicoord)
-    CC.forwardshift(mu=1)
+    print(CC.forwardshift(mu=1,snd_buf=np.array([[2,2],[1,1]],dtype='float')))
     CC.backwardshift(mu=1)

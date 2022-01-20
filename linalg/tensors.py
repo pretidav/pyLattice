@@ -1,5 +1,6 @@
 import numpy as np
 
+
 class Real():
     def __init__(self,value: float = 0):
         self.value = np.array([value],dtype=float)
