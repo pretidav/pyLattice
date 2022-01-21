@@ -2,8 +2,6 @@
 Lattice Gauge Theory simulation library: 
 
 [![Run Python Tests](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml/badge.svg)](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml)
-[![codecov](https://codecov.io/gh/pretidav/pyLattice/branch/parallel/graph/badge.svg?token=KWS8S8BH3T)](https://codecov.io/gh/pretidav/pyLattice)
-[![CodeQL](https://github.com/pretidav/pyLattice/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/pretidav/pyLattice/actions/workflows/codeql-analysis.yml)
 
 # Testing 
 
