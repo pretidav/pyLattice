@@ -1,4 +1,6 @@
 from lattice.grid import *
+from mpi.parallel import CartesianComm
+
 import numpy as np 
 mpigrid = [1,1]
 grid = [3,3]
