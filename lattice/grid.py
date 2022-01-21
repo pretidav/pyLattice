@@ -53,26 +53,24 @@ class LatticeMPI(LatticeBase):
         
 
     def moveforward(self,mu,step=1,value=None,dtype='float32'):
+        dummy_tensor_idx = np.reshape(np.array([i for i in range(self.length)]),self.grid)
         out = value 
-        snd_idx = np.ndarray.flatten(self.pick_last_slice(tensor=self.tensor_idx,mu=mu))
+        snd_idx = np.ndarray.flatten(self.pick_last_slice(tensor=dummy_tensor_idx,mu=mu))
         snd_halo = out[snd_idx]
-        tensor_idx_tmp = self.tensor_idx
-        super().moveforward(mu=mu,step=step)
-        out = out[self.flat_idx]
+        out = np.ndarray.flatten(np.roll(np.reshape(out,self.grid),shift=step,axis=mu))
         rcv_halo = self.cartesiancomm.forwardshift(mu, snd_buf=snd_halo,dtype=dtype)
-        rcv_idx = np.ndarray.flatten(self.pick_first_slice(tensor=tensor_idx_tmp,mu=mu))
+        rcv_idx = np.ndarray.flatten(self.pick_first_slice(tensor=dummy_tensor_idx,mu=mu))
         out[rcv_idx]=rcv_halo
         return out 
         
-    def movebackward(self,mu,step=1,value=None,dtype='float32'): 
+    def movebackward(self,mu,step=1,value=None,dtype='float32'):
+        dummy_tensor_idx = np.reshape(np.array([i for i in range(self.length)]),self.grid) 
         out = value
-        snd_idx = np.ndarray.flatten(self.pick_first_slice(tensor=self.tensor_idx, mu=mu))
+        snd_idx = np.ndarray.flatten(self.pick_first_slice(tensor=dummy_tensor_idx, mu=mu))
         snd_halo = out[snd_idx]
-        tensor_idx_tmp = self.tensor_idx
-        super().movebackward(mu=mu,step=step)
-        out = out[self.flat_idx]
+        out = np.ndarray.flatten(np.roll(np.reshape(out,self.grid),shift=-step,axis=mu))       
         rcv_halo = self.cartesiancomm.backwardshift(mu, snd_buf=snd_halo, dtype=dtype)
-        rcv_idx = np.ndarray.flatten(self.pick_last_slice(tensor=tensor_idx_tmp,mu=mu))
+        rcv_idx = np.ndarray.flatten(self.pick_last_slice(tensor=dummy_tensor_idx,mu=mu))
         out[rcv_idx]=rcv_halo
         return out
 
@@ -106,7 +104,7 @@ class LatticeReal(LatticeMPI):
         
     def movebackward(self,mu,step=1): 
         self.value = super().movebackward(mu=mu,step=1,value=self.value)
-
+        
     def reducesum(self): 
         return super().ReduceSum(value=self.value,dtype='float32')
 
