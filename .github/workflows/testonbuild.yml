@@ -22,5 +22,5 @@ jobs:
       - name: Run test Lattice
         run:  python test_lattice.py  
       - name: Run test MPI Lattice 
-        run:  mpiexec -n 2 manual_test_mpi.py
+        run:  mpiexec -n 2 python manual_test_mpi.py
       
