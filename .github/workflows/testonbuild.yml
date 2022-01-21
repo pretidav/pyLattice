@@ -15,10 +15,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Run test2
-        run: pytest test_lattice.py  
       - name: Run test1 
         run:  pytest test_linalg.py
+      - name: Run test2
+        run: pytest test_lattice.py  
       - name: Run MPI tests
         run:  mpiexec -n 2 manual_test_mpi.py
       
