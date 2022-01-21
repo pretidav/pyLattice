@@ -15,6 +15,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install coverage
+          pip install mpi4py
       - name: Run tests 
         run:   coverage run -m pytest test_linalg.py test_lattice.py  
       - name: "Upload coverage to Codecov"
