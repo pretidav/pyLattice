@@ -56,23 +56,39 @@ class LatticeMPI(LatticeBase):
         dummy_tensor_idx = np.reshape(np.array([i for i in range(self.length)]),self.grid)
         out = value 
         snd_idx = np.ndarray.flatten(self.pick_last_slice(tensor=dummy_tensor_idx,mu=mu))
-        snd_halo = out[snd_idx]
-        out = np.ndarray.flatten(np.roll(np.reshape(out,self.grid),shift=step,axis=mu))
+        snd_halo = np.ndarray.flatten(out[snd_idx])
+        new_shape = list(self.grid) 
+        new_shape.extend(out.shape[1:])
+        out = np.reshape(np.roll(np.reshape(out,new_shape),shift=step,axis=mu),out.shape)
         rcv_halo = self.cartesiancomm.forwardshift(mu, snd_buf=snd_halo,dtype=dtype)
         rcv_idx = np.ndarray.flatten(self.pick_first_slice(tensor=dummy_tensor_idx,mu=mu))
-        out[rcv_idx]=rcv_halo
+        rcv_shape = [len(snd_idx)]+list(out.shape[1:])
+        out[rcv_idx]=np.reshape(rcv_halo,rcv_shape)
         return out 
         
     def movebackward(self,mu,step=1,value=None,dtype='float32'):
-        dummy_tensor_idx = np.reshape(np.array([i for i in range(self.length)]),self.grid) 
-        out = value
-        snd_idx = np.ndarray.flatten(self.pick_first_slice(tensor=dummy_tensor_idx, mu=mu))
-        snd_halo = out[snd_idx]
-        out = np.ndarray.flatten(np.roll(np.reshape(out,self.grid),shift=-step,axis=mu))       
-        rcv_halo = self.cartesiancomm.backwardshift(mu, snd_buf=snd_halo, dtype=dtype)
+        dummy_tensor_idx = np.reshape(np.array([i for i in range(self.length)]),self.grid)
+        out = value 
+        snd_idx = np.ndarray.flatten(self.pick_first_slice(tensor=dummy_tensor_idx,mu=mu))
+        snd_halo = np.ndarray.flatten(out[snd_idx])
+        new_shape = list(self.grid) 
+        new_shape.extend(out.shape[1:])
+        out = np.reshape(np.roll(np.reshape(out,new_shape),shift=-step,axis=mu),out.shape)
+        rcv_halo = self.cartesiancomm.backwardshift(mu, snd_buf=snd_halo,dtype=dtype)
         rcv_idx = np.ndarray.flatten(self.pick_last_slice(tensor=dummy_tensor_idx,mu=mu))
-        out[rcv_idx]=rcv_halo
-        return out
+        rcv_shape = [len(snd_idx)]+list(out.shape[1:])
+        out[rcv_idx]=np.reshape(rcv_halo,rcv_shape)
+        return out 
+
+        # dummy_tensor_idx = np.reshape(np.array([i for i in range(self.length)]),self.grid) 
+        # out = value
+        # snd_idx = np.ndarray.flatten(self.pick_first_slice(tensor=dummy_tensor_idx, mu=mu))
+        # snd_halo = np.ndarray.flatten(out[snd_idx])
+        # out = np.ndarray.flatten(np.roll(np.reshape(out,self.grid),shift=-step,axis=mu))       
+        # rcv_halo = self.cartesiancomm.backwardshift(mu, snd_buf=snd_halo, dtype=dtype)
+        # rcv_idx = np.ndarray.flatten(self.pick_last_slice(tensor=dummy_tensor_idx,mu=mu))
+        # out[rcv_idx]=rcv_halo
+        # return out
 
     def ReduceSum(self,value,dtype='float32'): 
         out = np.array(0,dtype=dtype)

@@ -42,40 +42,31 @@ def test_complexfield():
     assert( np.abs(ComplexField.reducesum() - 9j)<tol)
     assert( np.abs(ComplexField.average() - 1j)<tol)
     
-# def test_realmatrixfield():
-#     Lattice = LatticeRealMatrix(grid=grid,cartesiancomm=CC, N=2)
-#     test = np.array([ [[1,2],[3,4]],     [[5,6],[7,8]],     [[9,10],[11,12]], 
-#                       [[13,14],[15,16]], [[17,18],[19,20]], [[21,22],[23,24]],
-#                       [[25,26],[27,28]], [[29,30],[31,32]], [[33,34],[35,36]]], dtype='float32')
-#     Lattice.fill_value(n=test)
-#     assert(np.sum(Lattice.value - test)<tol)
-#     assert( np.sum(Lattice.tensor_idx - np.array([[0,1,2],[3,4,5],[6,7,8]]))<tol )
-#     Lattice.movebackward(mu=0)
-#     assert( np.sum(Lattice.tensor_idx - np.array([[3,4,5],[6,7,8],[0,1,2]]))<tol)
-#     test_shift = np.array([[[13,14],[15,16]], [[17,18],[19,20]], [[21,22],[23,24]],
-#                            [[25,26],[27,28]], [[29,30],[31,32]], [[33,34],[35,36]],
-#                            [[1,2],[3,4]],     [[5,6],[7,8]],     [[9,10],[11,12]]], dtype='float32')
+def test_realmatrixfield():
+    Lattice = LatticeRealMatrix(grid=grid,cartesiancomm=CC, N=2)
+    test = np.array([ [[1,2],[3,4]],     [[5,6],[7,8]],     [[9,10],[11,12]], 
+                      [[13,14],[15,16]], [[17,18],[19,20]], [[21,22],[23,24]],
+                      [[25,26],[27,28]], [[29,30],[31,32]], [[33,34],[35,36]]], dtype='float32')
+    Lattice.fill_value(n=test)
+    assert( (np.abs(Lattice.value - test)<tol).all())
+    Lattice.moveforward(mu=0)
+    Lattice.movebackward(mu=0)
+    assert( (np.abs(Lattice.value - test)<tol).all())
 
-#     assert( np.sum(Lattice.value - test_shift)<tol)
-#     Lattice.moveforward(mu=0)
-#     assert( np.abs(np.sum(Lattice.value - test))<tol)
-#     assert( np.sum(Lattice.tensor_idx - np.array([[0,1,2],[3,4,5],[6,7,8]]))<tol)
-
-    # RealMatrixField = LatticeRealMatrix(grid=grid, cartesiancomm=CC, N=2)
-    # RealMatrixField2 = LatticeRealMatrix(grid=grid, cartesiancomm=CC, N=2)
-    # r = RealMatrix(value=np.array([[1,2],[3,4]],dtype='float32'))
-    # q = RealMatrix(value=np.array([[5,6],[7,8]],dtype='float32'))
-    # RealMatrixField.fill_value(n=r)
-    # RealMatrixField2.fill_value(n=q)
-    # assert(np.sum((RealMatrixField.trace()-5).value)<tol)
-    # assert(np.sum((RealMatrixField.transpose()-np.array([[1,3],[2,4]])).value)<tol)
-    # assert(np.sum((RealMatrixField.det()+2).value)<tol)
-    # assert(np.sum((RealMatrixField+q).value - np.array([[6,8],[10,12]]))<tol)
-    # assert(np.sum((RealMatrixField+RealMatrixField2).value - np.array([[6,8],[10,12]]))<tol)
-    # assert(np.sum((RealMatrixField-RealMatrixField2).value - np.array([[-4,-4],[-4,-4]]))<tol)
-    # assert(np.sum((RealMatrixField*RealMatrixField.inv()).value-2)<tol)
-    # assert(np.sum((RealMatrixField.inv()*r).value-2)<tol)
-#test_realmatrixfield() 
+    RealMatrixField = LatticeRealMatrix(grid=grid, cartesiancomm=CC, N=2)
+    RealMatrixField2 = LatticeRealMatrix(grid=grid, cartesiancomm=CC, N=2)
+    r = RealMatrix(value=np.array([[1,2],[3,4]],dtype='float32'))
+    q = RealMatrix(value=np.array([[5,6],[7,8]],dtype='float32'))
+    RealMatrixField.fill_value(n=r)
+    RealMatrixField2.fill_value(n=q)
+    assert( (np.abs((RealMatrixField.trace()-5).value)<tol).all())
+    assert( (np.abs((RealMatrixField.transpose()-np.array([[1,3],[2,4]])).value)<tol).all())
+    assert( (np.abs((RealMatrixField.det()+2).value)<tol).all())
+    assert( (np.abs((RealMatrixField+q).value - np.array([[6,8],[10,12]]))<tol).all())
+    assert( (np.abs((RealMatrixField+RealMatrixField2).value - np.array([[6,8],[10,12]]))<tol).all())
+    assert( (np.abs((RealMatrixField-RealMatrixField2).value - np.array([[-4,-4],[-4,-4]]))<tol).all())
+    assert( (np.abs((RealMatrixField*RealMatrixField.inv()).value - np.eye(2))<tol).all())
+    assert( (np.abs((RealMatrixField.inv()*r).value - np.eye(2))<tol).all())
 
 # # def test_complexmatrixfield():
 # #     Grid = LatticeParallel(grid=[4,4],pgrid=[2,1])
