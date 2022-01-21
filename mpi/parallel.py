@@ -12,24 +12,25 @@ class CartesianComm():
         self.mpidim = len(self.mpigrid)
         self.periodicity = [periodicity]*self.mpidim
         self.mpicoord, self.cartesian = self.create_cartesian()
+        self.mpitypes = {'float32': MPI.FLOAT, 'complex64': MPI.COMPLEX}
         self.cartesian.barrier()
         
     def find_nn_mpi(self,mu,displacement=1): 
         left,right = tuple(MPI.Cartcomm.Shift(self.cartesian,int(mu),displacement))
         return left, right 
 
-    def forwardshift(self,mu,snd_buf=np.array([1],dtype='float')):
+    def forwardshift(self,mu,snd_buf=np.array([1],dtype='float32'),dtype='float32'):
         rec_buf = snd_buf 
         l,r = self.find_nn_mpi(mu)
-        self.cartesian.Sendrecv(sendbuf=[snd_buf, MPI.FLOAT],dest=r,sendtag=0,
-                            recvbuf=[rec_buf, MPI.FLOAT],source=l,recvtag=0)
+        self.cartesian.Sendrecv(sendbuf=[snd_buf, self.mpitypes[dtype]],dest=r,sendtag=0,
+                            recvbuf=[rec_buf, self.mpitypes[dtype]],source=l,recvtag=0)
         return rec_buf
 
-    def backwardshift(self,mu,snd_buf=np.array([1],dtype='float')):
+    def backwardshift(self,mu,snd_buf=np.array([1],dtype='float32'),dtype='float32'):
         rec_buf = snd_buf 
         l,r = self.find_nn_mpi(mu)
-        self.cartesian.Sendrecv(sendbuf=[snd_buf, MPI.FLOAT],dest=l,sendtag=0,
-                            recvbuf=[rec_buf, MPI.FLOAT],source=r,recvtag=0)
+        self.cartesian.Sendrecv(sendbuf=[snd_buf, self.mpitypes[dtype]],dest=l,sendtag=0,
+                            recvbuf=[rec_buf, self.mpitypes[dtype]],source=r,recvtag=0)
         return rec_buf
 
     def create_comm(self):

@@ -1,5 +1,6 @@
 from linalg.tensors import *
-    
+
+#basic definitions
 tol = 10e-6
 a  = Real(10)
 b  = Real(-3)
@@ -16,9 +17,6 @@ C.value = np.array([[3,0],[0,6]])
 Ac  = ComplexMatrix(value=np.array([[0,1j],[3j,4]],dtype=complex))
 Bc  = ComplexMatrix(N=2)
 Bc.value = np.array([[2,1+7j],[0,2+9j]],dtype=complex)
-
-
-
 
 
 #Real tests 

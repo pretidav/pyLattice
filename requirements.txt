@@ -1,4 +1,4 @@
 numpy
 pytest
 matplotlib
-mtalg
+mpi4py
