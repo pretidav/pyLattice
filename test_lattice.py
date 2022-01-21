@@ -23,6 +23,7 @@ def test_realfield():
     assert( (np.abs(((Lattice + Lattice2).value)-np.array([5., 5., 5., 5., 5., 5., 5., 5., 5.]))<tol).all())
     assert( (np.abs(((Lattice2 - Lattice).value)-np.array([1., 1., 1., 1., 1., 1., 1., 1., 1.]))<tol).all())
     assert( (np.abs(((Lattice*Lattice2).value)-np.array([6., 6., 6., 6., 6., 6., 6., 6., 6.]))<tol).all())
+    print('[+] TEST grid={} mpigrid={}: LatticeReal passed'.format('x'.join([str(a) for a in grid]),'x'.join([str(a) for a in [1,1]])))
 
 def test_complexfield():
     Lattice = LatticeComplex(grid=grid,cartesiancomm=CC)
@@ -43,6 +44,7 @@ def test_complexfield():
     assert( (np.abs((ComplexField-ComplexField2).value-np.array([-3+1j]*3*3))<tol).all())
     assert( np.abs(ComplexField.reducesum() - 9j)<tol)
     assert( np.abs(ComplexField.average() - 1j)<tol)
+    print('[+] TEST grid={} mpigrid={}: LatticeComplex passed'.format('x'.join([str(a) for a in grid]),'x'.join([str(a) for a in [1,1]])))
     
 def test_realmatrixfield():
     Lattice = LatticeRealMatrix(grid=grid,cartesiancomm=CC, N=2)
@@ -69,6 +71,7 @@ def test_realmatrixfield():
     assert( (np.abs((RealMatrixField-RealMatrixField2).value - np.array([[-4,-4],[-4,-4]]))<tol).all())
     assert( (np.abs((RealMatrixField*RealMatrixField.inv()).value - np.eye(2))<tol).all())
     assert( (np.abs((RealMatrixField.inv()*r).value - np.eye(2))<tol).all())
+    print('[+] TEST grid={} mpigrid={}: LatticeRealMatrix passed'.format('x'.join([str(a) for a in grid]),'x'.join([str(a) for a in [1,1]])))
 
 # # def test_complexmatrixfield():
 # #     Grid = LatticeParallel(grid=[4,4],pgrid=[2,1])
@@ -116,3 +119,6 @@ def test_realmatrixfield():
 # #     assert(np.sum(ComplexVectorField[0] -np.array([1j,2,3])) <tol)
 # #     assert(np.sum((ComplexVectorField+ComplexVectorField2)[0] -np.array([2j,4,6])) <tol)
 
+test_realfield()
+test_complexfield()
+test_realmatrixfield()
