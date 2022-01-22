@@ -176,10 +176,10 @@ class LatticeComplex(LatticeMPI):
             return self.value[idx,:]
 
     def moveforward(self,mu,step=1): 
-        self.value = super().moveforward(mu=mu,step=1,value=self.value)
+        self.value = super().moveforward(mu=mu,step=1,value=self.value,dtype='complex64')
         
     def movebackward(self,mu,step=1): 
-        self.value = super().movebackward(mu=mu,step=1,value=self.value)
+        self.value = super().movebackward(mu=mu,step=1,value=self.value,dtype='complex64')
 
     def reducesum(self): 
         return super().ReduceSum(value=self.value,dtype='complex64')
@@ -234,19 +234,19 @@ class LatticeRealMatrix(LatticeMPI):
             self.value = n
 
     def moveforward(self,mu,step=1): 
-        self.value = super().moveforward(mu=mu,step=1,value=self.value)
+        self.value = super().moveforward(mu=mu,step=1,value=self.value,dtype='float32')
         
     def movebackward(self,mu,step=1): 
-        self.value = super().movebackward(mu=mu,step=1,value=self.value)
+        self.value = super().movebackward(mu=mu,step=1,value=self.value,dtype='float32')
         
     def __getitem__(self, idx:int):
             return self.value[idx,:]
 
     def reducesum(self): 
-        return super().ReduceSum(value=self.value)
+        return super().ReduceSum(value=self.value,dtype='float32')
 
     def average(self): 
-        return super().Average(value=self.value)
+        return super().Average(value=self.value,dtype='float32')
 
     def transpose(self):
         out = LatticeRealMatrix(grid=self.grid,cartesiancomm=self.cartesiancomm, N=self.N)
@@ -307,7 +307,7 @@ class LatticeRealMatrix(LatticeMPI):
         return out
 
 
-class LatticeComplexMatrix(): 
+class LatticeComplexMatrix(LatticeMPI): 
     def __init__(self, grid, cartesiancomm, N: int):
         super().__init__(grid=grid,cartesiancomm=cartesiancomm) 
         self.N = N
@@ -316,21 +316,23 @@ class LatticeComplexMatrix():
     def fill_value(self, n:ComplexMatrix):
         if isinstance(n,ComplexMatrix):
             self.value[:] = n.value
+        elif isinstance(n,np.ndarray): 
+            self.value = n 
 
     def moveforward(self,mu,step=1): 
-        self.value = super().moveforward(mu=mu,step=1,value=self.value)
+        self.value = super().moveforward(mu=mu,step=1,value=self.value,dtype='complex64')
         
     def movebackward(self,mu,step=1): 
-        self.value = super().movebackward(mu=mu,step=1,value=self.value)
+        self.value = super().movebackward(mu=mu,step=1,value=self.value,dtype='complex64')
 
     def __getitem__(self, idx:int):
             return self.value[idx,:]
 
     def reducesum(self): 
-        return super().ReduceSum(value=self.value)
+        return super().ReduceSum(value=self.value,dtype='complex64')
 
     def average(self): 
-        return super().Average(value=self.value)
+        return super().Average(value=self.value,dtype='complex64')
     
     def transpose(self):
         out = LatticeComplexMatrix(grid=self.grid,cartesiancomm=self.cartesiancomm, N=self.N)
@@ -339,13 +341,13 @@ class LatticeComplexMatrix():
         return out 
 
     def trace(self):
-        out = LatticeComplexMatrix(grid=self.grid,cartesiancomm=self.cartesiancomm, N=self.N)
+        out = LatticeComplex(grid=self.grid,cartesiancomm=self.cartesiancomm)
         for i in range(self.length):
             out.value[i]=np.trace(self.value[i,:,:])
         return out 
     
     def det(self):
-        out = LatticeComplexMatrix(grid=self.grid,cartesiancomm=self.cartesiancomm, N=self.N)
+        out = LatticeComplex(grid=self.grid,cartesiancomm=self.cartesiancomm)
         for i in range(self.length):
             out.value[i]=np.linalg.det(self.value[i,:,:])
         return out 
@@ -414,7 +416,7 @@ class LatticeComplexMatrix():
         return out
 
 
-class LatticeVectorReal(): 
+class LatticeVectorReal(LatticeMPI): 
     def __init__(self, grid, cartesiancomm, Nd: int):
         super().__init__(grid=grid,cartesiancomm=cartesiancomm) 
         self.Nd = Nd
@@ -423,13 +425,21 @@ class LatticeVectorReal():
     def fill_value(self, n:VectorReal):
         if isinstance(n,VectorReal):
             self.value[:] = n.value
+        elif isinstance(n,np.ndarray): 
+            self.value[:] = n
 
     def moveforward(self,mu,step=1): 
-        self.value = super().moveforward(mu=mu,step=1,value=self.value)
+        self.value = super().moveforward(mu=mu,step=1,value=self.value,dtype='float32')
         
     def movebackward(self,mu,step=1): 
-        self.value = super().movebackward(mu=mu,step=1,value=self.value)
+        self.value = super().movebackward(mu=mu,step=1,value=self.value,dtype='float32')
         
+    def reducesum(self): 
+        return super().ReduceSum(value=self.value,dtype='float32')
+
+    def average(self): 
+        return super().Average(value=self.value,dtype='float32')
+    
     def __getitem__(self, idx:int):
             return self.value[idx,:]
     
@@ -451,7 +461,8 @@ class LatticeVectorReal():
         if isinstance(rhs, LatticeVectorReal):
             assert(self.value.shape==rhs.value.shape)
             out.value = self.value - rhs.value
-        
+        return out 
+
     def __mul__(self,rhs):
         if isinstance(rhs, LatticeVectorReal):
             out = LatticeReal(grid=self.grid,cartesiancomm=self.cartesiancomm)
@@ -468,11 +479,7 @@ class LatticeVectorReal():
         return out
 
 
-
-
-
-
-class LatticeVectorComplex(): 
+class LatticeVectorComplex(LatticeMPI): 
     def __init__(self, grid, cartesiancomm, Nd: int):
         super().__init__(grid=grid,cartesiancomm=cartesiancomm) 
         self.Nd = Nd
@@ -480,14 +487,22 @@ class LatticeVectorComplex():
 
     def fill_value(self, n:VectorComplex):
         if isinstance(n,VectorComplex):
-            self.value[:] = n.value
+            self.value[:] = n.value[:]
+        elif isinstance(n,np.ndarray): 
+            self.value[:] = n
 
     def moveforward(self,mu,step=1): 
-        self.value = super().moveforward(mu=mu,step=1,value=self.value)
+        self.value = super().moveforward(mu=mu,step=1,value=self.value,dtype='complex64')
         
     def movebackward(self,mu,step=1): 
-        self.value = super().movebackward(mu=mu,step=1,value=self.value)
-        
+        self.value = super().movebackward(mu=mu,step=1,value=self.value,dtype='complex64')
+    
+    def reducesum(self): 
+        return super().ReduceSum(value=self.value,dtype='complex64')
+
+    def average(self): 
+        return super().Average(value=self.value,dtype='complex64')
+
     def __getitem__(self, idx:int):
             return self.value[idx,:]
     
@@ -509,7 +524,8 @@ class LatticeVectorComplex():
         if isinstance(rhs, (LatticeVectorReal,LatticeVectorComplex)):
             assert(self.value.shape==rhs.value.shape)
             out.value = self.value - rhs.value
-        
+        return out 
+
     def __mul__(self,rhs):
         if isinstance(rhs, LatticeVectorReal):
             out = LatticeReal(lattice=self.lattice)
@@ -542,7 +558,7 @@ class LatticeVectorComplex():
         return out
 
 
-class LatticeVectorRealMatrix(): 
+class LatticeVectorRealMatrix(LatticeMPI): 
     def __init__(self, grid, cartesiancomm, Nd: int, N:int):
         super().__init__(grid=grid,cartesiancomm=cartesiancomm) 
         self.Nd = Nd
@@ -554,11 +570,17 @@ class LatticeVectorRealMatrix():
             self.value[:] = n.value
 
     def moveforward(self,mu,step=1): 
-        self.value = super().moveforward(mu=mu,step=1,value=self.value)
+        self.value = super().moveforward(mu=mu,step=1,value=self.value,dtype='float32')
         
     def movebackward(self,mu,step=1): 
-        self.value = super().movebackward(mu=mu,step=1,value=self.value)
-        
+        self.value = super().movebackward(mu=mu,step=1,value=self.value,dtype='float32')
+    
+    def reducesum(self): 
+        return super().ReduceSum(value=self.value,dtype='float32')
+
+    def average(self): 
+        return super().Average(value=self.value,dtype='float32')
+
     def __getitem__(self, idx:int):
             return self.value[idx,:]
     
@@ -658,7 +680,7 @@ class LatticeVectorRealMatrix():
                     out.value[i,n] = self.value[i,n] * rhs
         return out
 
-class LatticeVectorComplexMatrix(): 
+class LatticeVectorComplexMatrix(LatticeMPI): 
     def __init__(self, grid, cartesiancomm, Nd: int, N: int):
         super().__init__(grid=grid,cartesiancomm=cartesiancomm) 
         self.Nd = Nd
@@ -670,11 +692,17 @@ class LatticeVectorComplexMatrix():
             self.value[:] = n.value
 
     def moveforward(self,mu,step=1): 
-        self.value = super().moveforward(mu=mu,step=1,value=self.value)
+        self.value = super().moveforward(mu=mu,step=1,value=self.value,dtype='complex64')
         
     def movebackward(self,mu,step=1): 
-        self.value = super().movebackward(mu=mu,step=1,value=self.value)
-        
+        self.value = super().movebackward(mu=mu,step=1,value=self.value,dtype='complex64')
+
+    def reducesum(self): 
+        return super().ReduceSum(value=self.value,dtype='complex64')
+
+    def average(self): 
+        return super().Average(value=self.value,dtype='complex64')
+
     def __getitem__(self, idx:int):
             return self.value[idx,:]
     

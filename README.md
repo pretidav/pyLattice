@@ -5,10 +5,6 @@ Lattice Gauge Theory simulation library:
 
 # Testing 
 
-~~~
-mpiexec -n 4 python manual_test_mpi.py --grid=3x3 --mpigrid=2x2
-~~~
-
 MatrixField = LatticeVectorRealMatrix(lattice=Grid,Nd=2,N=3)
 
 MatrixField2 = LatticeVectorRealMatrix(lattice=Grid,Nd=2,N=3)

@@ -419,8 +419,13 @@ class VectorRealMatrix():
     def __init__(self, Nd:int = None, N:int = None, value: np.ndarray = None):
         self.Nd = Nd 
         self.N  = N
-        self.value = np.zeros(shape=(Nd,N,N), dtype=float)
-        
+        if N!= None and Nd!=None:
+            self.value = np.zeros(shape=(Nd,N,N), dtype=float)
+        else: 
+            self.value = value
+            self.Nd = value.shape[0]
+            self.N  = value.shape[1]
+
     def __getitem__(self,mu:int):
         out = RealMatrix(N=self.N)
         out.value = self.value[mu]
@@ -508,17 +513,40 @@ class VectorRealMatrix():
         return out
 
     def transpose(self):
-        out = VectorRealMatrix(Nd=self.Nd)
-        out.value = self.value[:]
-        return out
+        out = VectorRealMatrix(Nd=self.Nd,N=self.N)
+        for i in range(self.Nd):
+            out.value[i]=np.transpose(self.value[i,:,:])
+        return out 
 
+    def trace(self):
+        out = VectorReal(Nd=self.Nd)
+        for i in range(self.Nd):
+            out.value[i]=np.trace(self.value[i,:,:])
+        return out 
+    
+    def det(self):
+        out = VectorReal(Nd=self.Nd)
+        for i in range(self.Nd):
+            out.value[i]=np.linalg.det(self.value[i,:,:])
+        return out 
+
+    def inv(self):
+        out = VectorRealMatrix(Nd=self.Nd,N=self.N)
+        for i in range(self.Nd):
+            out.value[i]=np.linalg.inv(self.value[i,:,:])
+        return out 
 
 class VectorComplexMatrix():
     def __init__(self, Nd:int = None, N:int = None, value: np.ndarray = None):
         self.Nd = Nd 
         self.N  = N
-        self.value = np.zeros(shape=(Nd,N,N), dtype=complex)
-        
+        if Nd!=None and N!=None:
+            self.value = np.zeros(shape=(Nd,N,N), dtype=complex)
+        else : 
+            self.value = value 
+            self.Nd = value.shape[0]
+            self.N = value.shape[1]
+
     def __getitem__(self,mu:int):
         out = ComplexMatrix(N=self.N)
         out.value = self.value[mu]
@@ -606,8 +634,45 @@ class VectorComplexMatrix():
         return out
 
     def transpose(self):
-        out = VectorComplexMatrix(Nd=self.Nd)
-        out.value = self.value[:]
+        out = VectorComplexMatrix(Nd=self.Nd,N=self.N)
+        for i in range(self.Nd):
+            out.value[i]=np.transpose(self.value[i,:,:])
+        return out 
+
+    def trace(self):
+        out = VectorComplex(Nd=self.Nd)
+        for i in range(self.Nd):
+            out.value[i]=np.trace(self.value[i,:,:])
+        return out 
+    
+    def det(self):
+        out = VectorComplex(Nd=self.Nd)
+        for i in range(self.Nd):
+            out.value[i]=np.linalg.det(self.value[i,:,:])
+        return out 
+
+    def inv(self):
+        out = VectorComplexMatrix(Nd=self.Nd,N=self.N)
+        for i in range(self.Nd):
+            out.value[i]=np.linalg.inv(self.value[i,:,:])
+        return out 
+
+    def conj(self):
+        out = VectorComplexMatrix(Nd=self.Nd, N=self.N)
+        out.value = np.conj(self.value) 
+        return out 
+
+    def adj(self):
+        tmp = VectorComplexMatrix(Nd=self.Nd, N=self.N)
+        tmp = self.conj()
+        return tmp.transpose()
+
+    def re(self):
+        out = VectorRealMatrix(Nd=self.Nd, N=self.N)
+        out.value = np.real(self.value)
         return out
 
-
+    def im(self):
+        out = VectorRealMatrix(Nd=self.Nd, N=self.N)
+        out.value = np.imag(self.value)
+        return out
