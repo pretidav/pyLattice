@@ -1,4 +1,4 @@
-numpy==1.21.2
-matplotlib==3.4.3
-mpi4py==3.1.1
-pytest==6.2.5
+numpy
+matplotlib
+mpi4py
+pytest
