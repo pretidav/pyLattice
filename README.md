@@ -1,8 +1,7 @@
-# pyLattice
-Lattice Gauge Theory simulation library: 
-
 [![Run Python Tests](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml/badge.svg)](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml)
 
+# pyLattice
+A lattice (gauge) theory simulation library in python.  
 
 ## Performance Test 
 
