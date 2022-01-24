@@ -18,4 +18,4 @@ Thread(s) per core:  2
 Core(s) per socket:  4
 ~~~
 
-![alt text](https://github.com/pretidav/pyLattice/raw/parallel/fig/perf.png)
+![alt text](https://github.com/pretidav/pyLattice/raw/main/fig/perf.png)
