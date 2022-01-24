@@ -1,4 +1,4 @@
-from lattice.grid import LatticeReal
+from lattice.grid import LatticeReal,LatticeVectorReal
 import numpy as np 
 from copy import deepcopy, copy
 
@@ -24,6 +24,7 @@ class IsingModel():
         self.field = field  
         self.M = self.magnetization()
         self.E = 0
+        self.nn_field = self.get_nn_field() 
 
     def magnetization(self): 
         return self.field.average()
@@ -32,16 +33,32 @@ class IsingModel():
         self.local_energy()
         return self.local_E.reducesum()
 
+    def get_nn_field(self): 
+        out = LatticeVectorReal(grid=self.field.grid,cartesiancomm=self.field.cartesiancomm, Nd=len(self.field.grid)*2)
+        for mu in range(len(self.field.grid)):
+            lattice = copy(self.field)
+            lattice.movebackward(mu=mu) 
+            out.poke_index(mu=mu,obj=lattice)
+            del lattice 
+        for mu in range(len(self.field.grid)):
+            lattice = copy(self.field)
+            lattice.moveforward(mu=mu) 
+            out.poke_index(mu=mu+len(self.field.grid),obj=lattice)
+            del lattice
+        return out
+
     def local_energy(self):
         self.local_E = IsingField(grid=self.field.grid, cartesiancomm=self.field.cartesiancomm)
         self.local_E.fill_value(n=0)
         for mu in range(len(self.field.grid)): 
-            R_lattice = copy(self.field)
-            L_lattice = copy(self.field)
-            R_lattice.moveforward(mu=mu)
-            L_lattice.movebackward(mu=mu)
-            self.local_E = self.local_E + (R_lattice + L_lattice)*self.field
-            del R_lattice, L_lattice
+            self.local_E = self.local_E + (self.nn_field.peek_index(mu) + self.nn_field.peek_index(mu+len(self.field.grid))) * self.field
+
+    # def update_nn_field(self,idx): 
+    #     for mu in range(len(self.field.grid)):
+    #         if mu==0: 
+    #             self.nn_field.value[idx+1,mu] = 9
+    #         else: 
+    #             self.nn_field.value[idx+np.prod(self.field.grid[:mu]),mu] = 9
             
 class Metropolis(): 
     def __init__(self): 

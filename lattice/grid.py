@@ -472,6 +472,14 @@ class LatticeVectorReal(LatticeMPI):
     def __getitem__(self, idx: int):
         return self.value[idx, :]
 
+    def peek_index(self,mu): 
+        out = LatticeReal(grid=self.grid,cartesiancomm=self.cartesiancomm)
+        out.value = self.value[:,mu]
+        return out
+    
+    def poke_index(self,mu,obj: LatticeReal): 
+        self.value[:,mu]=obj.value
+
     def transpose(self):
         out = LatticeVectorReal(
             grid=self.grid, cartesiancomm=self.cartesiancomm, Nd=self.Nd)
