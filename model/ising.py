@@ -29,17 +29,20 @@ class IsingModel():
         return self.field.average()
     
     def energy(self): 
-        tmp = IsingField(grid=self.field.grid, cartesiancomm=self.field.cartesiancomm)
-        tmp.fill_value(n=0)
+        self.local_energy()
+        return self.local_E.reducesum()
+
+    def local_energy(self):
+        self.local_E = IsingField(grid=self.field.grid, cartesiancomm=self.field.cartesiancomm)
+        self.local_E.fill_value(n=0)
         for mu in range(len(self.field.grid)): 
             R_lattice = copy(self.field)
             L_lattice = copy(self.field)
             R_lattice.moveforward(mu=mu)
             L_lattice.movebackward(mu=mu)
-            tmp = tmp + (R_lattice + L_lattice)*self.field
+            self.local_E = self.local_E + (R_lattice + L_lattice)*self.field
             del R_lattice, L_lattice
-        return tmp.reducesum()
-
+            
 class Metropolis(): 
     def __init__(self): 
-        pass
+        self.seed 
