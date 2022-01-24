@@ -1,9 +1,3 @@
 __pycache__/*
-linalg/__pycache__/*
-lattice/__pycache__/*
 .vscode/settings.json
-threads/__pycache__/*
-mpi/__pycache__/parallel.cpython-36.pyc
-mpi/__pycache__/parallel.cpython-37.pyc
-utils/__pycache__/inputargs.cpython-36.pyc
-utils/__pycache__/inputargs.cpython-37.pyc
+*/__pycache__/*
