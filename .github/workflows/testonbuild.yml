@@ -1,0 +1,26 @@
+name: Run Python Tests
+on: [push]
+  
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: mpi4py/setup-mpi@v1
+        with:
+          mpi: openmpi
+      - name: Install Python 3
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.6
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run test Linalg 
+        run:  pytest test_linalg.py
+      - name: Run test Lattice
+        run:  python test_lattice.py  
+      - name: Run test MPI Lattice 
+        run:  mpiexec -n 2 python test_lattice_mpi.py
+      
