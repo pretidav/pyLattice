@@ -16,8 +16,7 @@ class IsingField(LatticeReal):
             self.value[:]=-1
         if self.initialization=='random': 
             np.random.seed(seed=self.seed)
-            self.value[:]=np.array(np.random.randint(low=-1, high=1, size=self.value.shape),dtype='float32')
-
+            self.value[:]=np.array(np.random.choice([-1,1],self.value.shape),dtype='float32')
 
 class IsingModel():
     def __init__(self,field):
@@ -25,6 +24,7 @@ class IsingModel():
         self.M = self.magnetization()
         self.E = 0
         self.nn_field = self.get_nn_field() 
+        self.boundary_up, self.boundary_down = self.get_boundary_idx()
 
     def magnetization(self): 
         return self.field.average()
@@ -53,13 +53,34 @@ class IsingModel():
         for mu in range(len(self.field.grid)): 
             self.local_E = self.local_E + (self.nn_field.peek_index(mu) + self.nn_field.peek_index(mu+len(self.field.grid))) * self.field
 
-    # def update_nn_field(self,idx): 
-    #     for mu in range(len(self.field.grid)):
-    #         if mu==0: 
-    #             self.nn_field.value[idx+1,mu] = 9
-    #         else: 
-    #             self.nn_field.value[idx+np.prod(self.field.grid[:mu]),mu] = 9
-            
-class Metropolis(): 
-    def __init__(self): 
-        self.seed 
+    def flip_site_field(self,idx): 
+        self.field.value[idx] *= -1
+        self.update_nn_field(idx)
+
+    def update_nn_field(self,idx): 
+        lengrid = len(self.field.grid)
+        for ii in idx: 
+            count = 0 
+            for mu in reversed(range(lengrid)):
+                shift = np.prod(self.field.grid[:mu])
+                if ii not in self.boundary_up[count]:
+                    self.nn_field.value[ii-shift,count] *=-1 
+                if ii not in self.boundary_down[count]:
+                    self.nn_field.value[ii+shift,count+lengrid] *=-1 
+                count +=1
+    
+    def get_boundary_idx(self):
+        boundary_up=[] 
+        boundary_down=[]     
+        dummy_tensor_idx = np.reshape(np.array([i for i in range(self.field.length)]), self.field.grid)
+        for mu in range(len(self.field.grid)):
+            boundary_up.append(np.ndarray.flatten(self.field.pick_first_slice(tensor=dummy_tensor_idx, mu=mu)))
+            boundary_down.append(np.ndarray.flatten(self.field.pick_last_slice(tensor=dummy_tensor_idx, mu=mu)))
+        return boundary_up, boundary_down
+
+    def global_update(self):
+        idx = np.array([i for i in range(self.field.length)])
+        self.local_energy()
+        self.field.value, flipped_idx = np.where(self.local_E.value<0,(self.field.value*-1,idx),(self.field.value,idx*np.NAN))
+        flipped_idx = np.array(flipped_idx[~np.isnan(flipped_idx)],dtype='i')
+        self.update_nn_field(idx=flipped_idx)
