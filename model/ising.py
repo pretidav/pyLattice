@@ -2,6 +2,8 @@ from lattice.grid import LatticeReal,LatticeVectorReal
 import numpy as np 
 from copy import deepcopy, copy
 
+from mpi.parallel import pprint
+
 class IsingField(LatticeReal):
     def __init__(self,grid,cartesiancomm, initialization='random', seed = 0): 
         super().__init__(grid,cartesiancomm)
@@ -19,12 +21,15 @@ class IsingField(LatticeReal):
             self.value[:]=np.array(np.random.choice([-1,1],self.value.shape),dtype='float32')
 
 class IsingModel():
-    def __init__(self,field):
+    def __init__(self,field,logger,beta):
+        self.beta = beta
+        self.log = logger 
         self.field = field  
         self.M = self.magnetization()
         self.E = 0
         self.nn_field = self.get_nn_field() 
         self.boundary_up, self.boundary_down = self.get_boundary_idx()
+        self.local_E = self.local_energy()
 
     def magnetization(self): 
         return self.field.average()
@@ -48,10 +53,11 @@ class IsingModel():
         return out
 
     def local_energy(self):
-        self.local_E = IsingField(grid=self.field.grid, cartesiancomm=self.field.cartesiancomm)
-        self.local_E.fill_value(n=0)
+        local_E = IsingField(grid=self.field.grid, cartesiancomm=self.field.cartesiancomm)
+        local_E.fill_value(n=0)
         for mu in range(len(self.field.grid)): 
-            self.local_E = self.local_E + (self.nn_field.peek_index(mu) + self.nn_field.peek_index(mu+len(self.field.grid))) * self.field
+            local_E = local_E + (self.nn_field.peek_index(mu) + self.nn_field.peek_index(mu+len(self.field.grid))) * self.field
+        return local_E
 
     def flip_site_field(self,idx): 
         self.field.value[idx] *= -1
@@ -79,8 +85,20 @@ class IsingModel():
         return boundary_up, boundary_down
 
     def global_update(self):
-        idx = np.array([i for i in range(self.field.length)])
-        self.local_energy()
-        self.field.value, flipped_idx = np.where(self.local_E.value<0,(self.field.value*-1,idx),(self.field.value,idx*np.NAN))
-        flipped_idx = np.array(flipped_idx[~np.isnan(flipped_idx)],dtype='i')
-        self.update_nn_field(idx=flipped_idx)
+        flip_idx = self.metropolis_test()
+        self.field.value = np.where(flip_idx,self.field.value*-1,self.field.value)
+        self.update_nn_field(idx=flip_idx)
+        self.local_E = self.local_energy()
+        
+    def metropolis_test(self):
+        rng = np.random.random(size=self.field.length) 
+        return rng<np.exp(-self.local_E.value/(self.beta)) 
+        
+    def run_mc(self,steps): 
+        pprint(comm=self.field.cartesiancomm.comm, msg=self.magnetization())
+        pprint(comm=self.field.cartesiancomm.comm, msg=self.energy())
+        for n in range(steps): 
+            self.global_update()
+            pprint(comm=self.field.cartesiancomm.comm, msg='epoch: {}'.format(n))
+            pprint(comm=self.field.cartesiancomm.comm, msg='M: {}'.format(self.magnetization()))
+            pprint(comm=self.field.cartesiancomm.comm, msg='E: {}'.format(self.energy()))
