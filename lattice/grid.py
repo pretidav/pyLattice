@@ -14,6 +14,9 @@ class LatticeBase():
         self.flat_idx = self.get_flat_idx()
         self.tensor_idx = self.get_tensor_idx(idx=self.flat_idx)
 
+    def get_red_black_idx(self):  #THIS IS SUPER CLEVER
+        np.indices(self.grid).sum(axis=0) % 2
+
     def moveforward(self, mu, step=1):
         self.tensor_idx = np.roll(self.tensor_idx, shift=step, axis=mu)
         self.update_flat_idx()
