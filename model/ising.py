@@ -86,26 +86,30 @@ class IsingModel():
         acc_matrix = rng <= r 
         return acc_matrix 
         
-    def run_mc(self,steps): 
-        m = self.magnetization()
-        e = self.energy()
+    def run_mc(self,steps,online_obs=False):
         pprint(comm=self.field.cartesiancomm.comm, msg='--- epoch: {}'.format(0))
-        self.mlist.append(m)
-        self.elist.append(e)
-        self.nlist.append(0)
-        for n in range(steps): 
-            acc = self.global_update()
-            mean_acc = self.field.Average(value=acc, dtype='float32')
+        if online_obs==True: 
             m = self.magnetization()
             e = self.energy()
-            pprint(comm=self.field.cartesiancomm.comm, msg='--- epoch: {} acc:{} {}'.format(n+1,acc,mean_acc))
             self.mlist.append(m)
             self.elist.append(e)
-            self.nlist.append(n)
-            self.acclist.append(float(mean_acc))
+            self.nlist.append(0)
+        for n in range(steps): 
+            acc = self.global_update()
+            pprint(comm=self.field.cartesiancomm.comm, msg='--- epoch: {}'.format(n+1))
+            if online_obs==True:
+                mean_acc = self.field.Average(value=acc, dtype='float32')
+                m = self.magnetization()
+                e = self.energy()
+                self.mlist.append(m)
+                self.elist.append(e)
+                self.nlist.append(n)
+                self.acclist.append(float(mean_acc))
 
     def plot_mc(self): 
-        pplot(comm=self.field.cartesiancomm.comm, x=self.nlist, y=self.mlist, title='Magnetization size={} beta={}'.format(self.field.grid*self.field.cartesiancomm.mpigrid,self.beta), file='./mag.png')
-        pplot(comm=self.field.cartesiancomm.comm, x=self.nlist, y=self.elist, title='Energy density size={} beta={}'.format(self.field.grid*self.field.cartesiancomm.mpigrid,self.beta), file='./ene.png')
-        pplot(comm=self.field.cartesiancomm.comm, x=self.nlist[1:], y=self.acclist, title='Acceptance size={} beta={}'.format(self.field.grid*self.field.cartesiancomm.mpigrid,self.beta), file='./acc.png')
-        
+        if len(self.mlist)+len(self.elist)+len(self.nlist)>0:
+            pplot(comm=self.field.cartesiancomm.comm, x=self.nlist, y=self.mlist, title='Magnetization size={} beta={}'.format(self.field.grid*self.field.cartesiancomm.mpigrid,self.beta), file='./mag.png')
+            pplot(comm=self.field.cartesiancomm.comm, x=self.nlist, y=self.elist, title='Energy density size={} beta={}'.format(self.field.grid*self.field.cartesiancomm.mpigrid,self.beta), file='./ene.png')
+            pplot(comm=self.field.cartesiancomm.comm, x=self.nlist[1:], y=self.acclist, title='Acceptance size={} beta={}'.format(self.field.grid*self.field.cartesiancomm.mpigrid,self.beta), file='./acc.png')
+        else:
+            pprint(comm=self.field.cartesiancomm.comm, msg='[x] NO PLOTS. "online_obs" must be set to True')

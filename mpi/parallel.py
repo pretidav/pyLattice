@@ -67,6 +67,8 @@ class CartesianComm():
         mpicoord = cartesian.Get_coords(self.rank)
         return mpicoord, cartesian
 
+    # def parallel_print_cnfg(self,value):
+    #     break 
 
 if __name__ == '__main__':
     CC = CartesianComm(mpigrid=[2, 2])
