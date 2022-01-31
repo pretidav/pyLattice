@@ -9,7 +9,7 @@ def pprint(comm, msg):
 def pplot(comm,x,y,title,file='./ising.png'): 
     if comm.Get_rank() == 0:
         plt.figure()
-        plt.scatter(x=x,y=y)
+        plt.plot(x,y,'-k')
         plt.xlabel('trj')
         plt.title(title)
         plt.savefig(file)

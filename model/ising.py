@@ -24,7 +24,7 @@ class IsingModel():
         self.beta = beta
         self.log = logger 
         self.field = field  
-        self.mlist, self.elist, self.nlist = [],[],[]
+        self.mlist, self.elist, self.nlist, self.acclist = [],[],[], []
         self.M = self.magnetization()
         self.E = 0
         self.nn_field = self.get_nn_field() 
@@ -35,7 +35,7 @@ class IsingModel():
     
     def energy(self): 
         self.local_E = self.local_energy(input_field=self.field)
-        return self.local_E.reducesum()
+        return self.local_E.average()
 
     def get_nn_field(self): 
         out = LatticeVectorReal(grid=self.field.grid,cartesiancomm=self.field.cartesiancomm, Nd=len(self.field.grid)*2)
@@ -78,7 +78,7 @@ class IsingModel():
         self.nn_field = self.get_nn_field() 
         self.local_E = self.local_energy(self.field)
 
-        return (np.sum(acc_E)+np.sum(acc_O))/np.prod(self.field.grid)
+        return (np.sum(acc_E)+np.sum(acc_O))
 
     def metropolis_test(self,deltaE):
         rng = np.random.random(size=len(deltaE.value)) 
@@ -91,18 +91,21 @@ class IsingModel():
         e = self.energy()
         pprint(comm=self.field.cartesiancomm.comm, msg='--- epoch: {}'.format(0))
         self.mlist.append(m)
-        self.elist.append(e/np.prod(self.field.grid))
+        self.elist.append(e)
         self.nlist.append(0)
         for n in range(steps): 
             acc = self.global_update()
+            mean_acc = self.field.Average(value=acc, dtype='float32')
             m = self.magnetization()
             e = self.energy()
-            pprint(comm=self.field.cartesiancomm.comm, msg='--- epoch: {} acc:{}'.format(n+1,acc))
+            pprint(comm=self.field.cartesiancomm.comm, msg='--- epoch: {} acc:{} {}'.format(n+1,acc,mean_acc))
             self.mlist.append(m)
-            self.elist.append(e/np.prod(self.field.grid))
+            self.elist.append(e)
             self.nlist.append(n)
+            self.acclist.append(float(mean_acc))
 
-    def plot(self): 
+    def plot_mc(self): 
         pplot(comm=self.field.cartesiancomm.comm, x=self.nlist, y=self.mlist, title='Magnetization size={} beta={}'.format(self.field.grid*self.field.cartesiancomm.mpigrid,self.beta), file='./mag.png')
         pplot(comm=self.field.cartesiancomm.comm, x=self.nlist, y=self.elist, title='Energy density size={} beta={}'.format(self.field.grid*self.field.cartesiancomm.mpigrid,self.beta), file='./ene.png')
+        pplot(comm=self.field.cartesiancomm.comm, x=self.nlist[1:], y=self.acclist, title='Acceptance size={} beta={}'.format(self.field.grid*self.field.cartesiancomm.mpigrid,self.beta), file='./acc.png')
         

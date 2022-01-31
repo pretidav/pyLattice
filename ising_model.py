@@ -13,4 +13,4 @@ if __name__ == '__main__':
     model = IsingModel(field=field,logger=LL.log, beta=PP.beta)
 
     model.run_mc(steps=PP.steps)
-    model.plot()
+    model.plot_mc()
