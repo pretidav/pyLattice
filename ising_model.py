@@ -1,6 +1,6 @@
 from model.ising import IsingField, IsingModel
 from utils.inputargs import Parser, Logger
-from mpi.parallel import CartesianComm, pprint
+from mpi.parallel import CartesianComm, pprint, pplot
 import numpy as np 
 
 if __name__ == '__main__': 
@@ -13,3 +13,4 @@ if __name__ == '__main__':
     model = IsingModel(field=field,logger=LL.log, beta=PP.beta)
 
     model.run_mc(steps=PP.steps)
+    model.plot()

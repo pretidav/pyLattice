@@ -1,11 +1,19 @@
 from mpi4py import MPI
 import numpy as np
-
+import matplotlib.pyplot as plt
 
 def pprint(comm, msg):
     if comm.Get_rank() == 0:
         print(msg)
 
+def pplot(comm,x,y,title,file='./ising.png'): 
+    if comm.Get_rank() == 0:
+        plt.figure()
+        plt.scatter(x=x,y=y)
+        plt.xlabel('trj')
+        plt.title(title)
+        plt.savefig(file)
+        print('plot: {} - saved to {}'.format(title,file))
 
 class CartesianComm():
     def __init__(self, mpigrid, periodicity=True):

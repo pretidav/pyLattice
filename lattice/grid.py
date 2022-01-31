@@ -125,10 +125,12 @@ class LatticeReal(LatticeMPI):
         O_latt.value = self.value[O_idx]
         return E_latt, O_latt
 
-    def poke_EO_lattices(self,E_lattice,O_lattice): 
+    def poke_EO_lattices(self,E_lattice=None,O_lattice=None): 
         E_idx, O_idx = self.get_EO_idx()
-        self.value[E_idx] = E_lattice.value 
-        self.value[O_idx] = O_lattice.value
+        if E_lattice!=None:
+            self.value[E_idx] = E_lattice.value 
+        if O_lattice!=None:
+            self.value[O_idx] = O_lattice.value
 
     def __getitem__(self, idx: int):
         return self.value[idx, :]
