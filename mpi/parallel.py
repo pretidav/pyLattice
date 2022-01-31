@@ -1,11 +1,19 @@
 from mpi4py import MPI
 import numpy as np
-
+import matplotlib.pyplot as plt
 
 def pprint(comm, msg):
     if comm.Get_rank() == 0:
         print(msg)
 
+def pplot(comm,x,y,title,file='./ising.png'): 
+    if comm.Get_rank() == 0:
+        plt.figure()
+        plt.plot(x,y,'-k')
+        plt.xlabel('trj')
+        plt.title(title)
+        plt.savefig(file)
+        print('plot: {} - saved to {}'.format(title,file))
 
 class CartesianComm():
     def __init__(self, mpigrid, periodicity=True):
@@ -16,6 +24,17 @@ class CartesianComm():
         self.mpicoord, self.cartesian = self.create_cartesian()
         self.mpitypes = {'float32': MPI.FLOAT, 'complex64': MPI.COMPLEX}
         self.cartesian.barrier()
+
+    def parallel_RNG(self,seed=0): 
+        if self.rank == 0: 
+            np.random.seed(seed=seed)
+            snd_seed = np.random.randint(low=0,high=9999,dtype='i',size=np.prod(self.mpigrid))
+        else : 
+            snd_seed = None
+        recv_seed = np.array(1,dtype='i')
+        self.cartesian.Scatter(snd_seed,recv_seed,root=0)
+        self.cartesian.barrier()
+        return recv_seed 
 
     def find_nn_mpi(self, mu, displacement=1):
         left, right = tuple(MPI.Cartcomm.Shift(
@@ -48,6 +67,8 @@ class CartesianComm():
         mpicoord = cartesian.Get_coords(self.rank)
         return mpicoord, cartesian
 
+    # def parallel_print_cnfg(self,value):
+    #     break 
 
 if __name__ == '__main__':
     CC = CartesianComm(mpigrid=[2, 2])

@@ -20,7 +20,9 @@ jobs:
       - name: Run test Linalg 
         run:  pytest test_linalg.py
       - name: Run test Lattice
-        run:  python test_lattice.py  
+        run:  python test_lattice.py
+      - name: Run test LatticeEO
+        run:  python test_lattice_EO.py    
       - name: Run test MPI Lattice 
         run:  mpiexec -n 2 python test_lattice_mpi.py
       

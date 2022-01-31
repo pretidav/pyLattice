@@ -3,6 +3,12 @@
 # pyLattice
 A lattice (gauge) theory simulation library in python.  
 
+# Ising Model 
+
+~~~
+mpiexec -np 4 python ising_model.py --grid=20x20 --mpigrid=2x2 --beta=1.5 --steps=2000
+~~~
+
 ## Performance Test 
 
 ~~~
