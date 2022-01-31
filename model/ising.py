@@ -1,8 +1,8 @@
 from lattice.grid import LatticeReal,LatticeVectorReal
 import numpy as np 
 from copy import deepcopy, copy
-
 from mpi.parallel import pprint
+import matplotlib.pyplot as plt
 
 class IsingField(LatticeReal):
     def __init__(self,grid,cartesiancomm, initialization='cold', seed = 0): 
@@ -28,14 +28,13 @@ class IsingModel():
         self.M = self.magnetization()
         self.E = 0
         self.nn_field = self.get_nn_field() 
-        self.boundary_up, self.boundary_down = self.get_boundary_idx()
         self.local_E = self.local_energy(self.field)
 
     def magnetization(self): 
         return self.field.average()
     
     def energy(self): 
-        self.local_energy(input_field=self.field)
+        self.local_E = self.local_energy(input_field=self.field)
         return self.local_E.reducesum()
 
     def get_nn_field(self): 
@@ -58,59 +57,70 @@ class IsingModel():
         for mu in range(len(input_field.grid)): 
             local_E = local_E + (self.nn_field.peek_index(mu) + self.nn_field.peek_index(mu+len(input_field.grid))) * input_field
         return local_E
-
-    def flip_site_field(self,idx): 
-        self.field.value[idx] *= -1
-        self.update_nn_field(idx)
-
-    def update_nn_field(self,idx): 
-        lengrid = len(self.field.grid)
-        for ii in idx: 
-            count = 0 
-            for mu in reversed(range(lengrid)):
-                shift = np.prod(self.field.grid[:mu])
-                if ii not in self.boundary_up[count]:
-                    self.nn_field.value[ii-shift,count] *=-1 
-                if ii not in self.boundary_down[count]:
-                    self.nn_field.value[ii+shift,count+lengrid] *=-1 
-                count +=1
     
     def get_boundary_idx(self):
         boundary_up=[] 
         boundary_down=[]     
-        dummy_tensor_idx = np.reshape(np.array([i for i in range(self.field.length)]), self.field.grid)
+        dummy_tensor_idx = np.reshape(np.array([i for i in range(np.prod(self.field.grid))]), self.field.grid)
         for mu in range(len(self.field.grid)):
             boundary_up.append(np.ndarray.flatten(self.field.pick_first_slice(tensor=dummy_tensor_idx, mu=mu)))
             boundary_down.append(np.ndarray.flatten(self.field.pick_last_slice(tensor=dummy_tensor_idx, mu=mu)))
         return boundary_up, boundary_down
 
     def global_update(self):
-        new_field = copy(self.field)
-        new_field.value[:]=self.field.value*np.array(np.random.choice([-1,1],self.field.value.shape),dtype='float32')
-
-        new_local_E = self.local_energy(input_field=new_field)
-        flip_idx = self.metropolis_test(proposal=new_local_E)
-        self.field.value = np.where(flip_idx,self.field.value*-1,self.field.value)
-        self.update_nn_field(idx=flip_idx)
-        self.local_E = self.local_energy(input_field=self.field)
+        delta_energy = self.local_energy(self.field)*(2)
+        delta_energy_E,delta_energy_O = delta_energy.peek_EO_lattices()
+        field_E, field_O = self.field.peek_EO_lattices()
         
-    def metropolis_test(self,proposal):
-        rng = np.random.random(size=len(self.field.value))
-        #print(rng) 
-        r = np.minimum(1, np.exp( (self.local_E.value-proposal.value)/self.beta))     
-        print(self.local_E.value)
-        print(proposal.value)
-        #print(np.exp( (self.local_E.value-proposal.value)/self.beta))
+        #Even Update 
+        acc_E = self.metropolis_test(deltaE = delta_energy_E)
+        field_E.value[:]=np.where(acc_E,field_E.value*-1,field_E.value)
+        # print(acc_E)
+        # print(field_E.value)
+       
+        delta_energy = self.local_energy(self.field)*(2)
+        delta_energy_E,delta_energy_O = delta_energy.peek_EO_lattices()
+        field_E, field_O = self.field.peek_EO_lattices()
+       
+        #Odd Update 
+        acc_O = self.metropolis_test(deltaE = delta_energy_O)
+        field_O.value[:]=np.where(acc_O,field_O.value*-1,field_O.value)
+        # print(acc_O)
+        # print(field_O.value)
+        self.field.poke_EO_lattices(E_lattice=field_E,O_lattice=field_O)
+        # print(self.field.value.reshape(self.field.grid))
+        self.nn_field = self.get_nn_field() 
+        self.local_E = self.local_energy(self.field)
+
+        return (np.sum(acc_E)+np.sum(acc_O))/np.prod(self.field.grid)
+
+    def metropolis_test(self,deltaE):
+        rng = np.random.random(size=len(deltaE.value)) 
+        r = np.minimum(1, np.exp(deltaE.value)/self.beta)    
         acc_matrix = r>rng 
-        print(acc_matrix)
-        print(np.sum(acc_matrix)/len(self.field.grid))
         return acc_matrix 
         
     def run_mc(self,steps): 
-        pprint(comm=self.field.cartesiancomm.comm, msg=self.magnetization())
-        pprint(comm=self.field.cartesiancomm.comm, msg=self.energy())
+        mlist, elist, nlist = [],[], []
+        m = self.magnetization()
+        e = self.energy()
+        pprint(comm=self.field.cartesiancomm.comm, msg='--- epoch: {}'.format(0))
+        pprint(comm=self.field.cartesiancomm.comm, msg='M: {}'.format(m))
+        pprint(comm=self.field.cartesiancomm.comm, msg='E: {}'.format(e))
+        mlist.append(m)
+        elist.append(e/np.prod(self.field.grid))
+        nlist.append(0)
         for n in range(steps): 
-            self.global_update()
-            pprint(comm=self.field.cartesiancomm.comm, msg='epoch: {}'.format(n))
-            pprint(comm=self.field.cartesiancomm.comm, msg='M: {}'.format(self.magnetization()))
-            pprint(comm=self.field.cartesiancomm.comm, msg='E: {}'.format(self.energy()))
+            acc = self.global_update()
+            m = self.magnetization()
+            e = self.energy()
+            pprint(comm=self.field.cartesiancomm.comm, msg='--- epoch: {}'.format(n+1))
+            pprint(comm=self.field.cartesiancomm.comm, msg='acceptance: {}'.format(acc))
+            pprint(comm=self.field.cartesiancomm.comm, msg='M: {}'.format(m))
+            pprint(comm=self.field.cartesiancomm.comm, msg='E: {}'.format(e))
+            mlist.append(m)
+            elist.append(e/np.prod(self.field.grid))
+            nlist.append(n)
+        plt.scatter(x=nlist,y=mlist)
+        #plt.scatter(x=nlist,y=elist)
+        plt.savefig('./ising.png')
