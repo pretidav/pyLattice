@@ -56,3 +56,28 @@ This number can be checked with
 import psutil 
 print(psutil.cpu_count(logical=False))
 ~~~
+
+## HDF5 installation 
+
+~~~
+conda install -c conda-forge "h5py>=2.9=mpi*"
+~~~
+
+Run test script 
+
+~~~
+cd IO/
+mpiexec -n 4 demo.py
+~~~
+
+check hdf5 file output structure with 
+
+~~~
+h5dump -n parallel_test.hdf5
+~~~
+
+and inspect it with 
+
+~~~
+h5dump -D /test parallel_test.hdf5
+~~~
