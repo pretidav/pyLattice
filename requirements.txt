@@ -3,4 +3,3 @@ matplotlib
 mpi4py
 pytest
 psutil
-h5py
