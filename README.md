@@ -67,7 +67,7 @@ Run test script
 
 ~~~
 cd IO/
-mpiexec -n 4 demo.py
+mpiexec -n 4 python demo.py
 ~~~
 
 check hdf5 file output structure with 

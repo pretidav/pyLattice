@@ -27,10 +27,12 @@ class LatticeBase():
         self.update_flat_idx()
 
     def get_idx(self, x):
-        idx = x[-1]
-        for d in reversed(range(len(self.grid)-1)):
-            idx *= self.grid[d]
-            idx += x[d]
+
+        # idx = x[-1]
+        # for d in reversed(range(len(self.grid)-1)):
+        #    idx *= self.grid[d]
+        #    idx += x[d]
+        idx = np.ravel_multi_index(x,tuple(self.grid),order='F')  # FIXME need test ordering
         return idx
 
     def get_tensor_idx(self, idx: np.ndarray):
@@ -44,10 +46,10 @@ class LatticeBase():
         self.flat_idx = np.ndarray.flatten(self.tensor_idx)
 
     def pick_last_slice(self, tensor, mu):
-        return np.take(tensor, indices=-1, axis=mu)
+        return np.take(tensor, indices=-1, axis=mu) #FIXME need test ordering
 
     def pick_first_slice(self, tensor, mu):
-        return np.take(tensor, indices=0, axis=mu)
+        return np.take(tensor, indices=0, axis=mu) #FIXME need test ordering
 
 
 class LatticeMPI(LatticeBase):
