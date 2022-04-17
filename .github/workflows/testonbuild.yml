@@ -21,7 +21,6 @@ jobs:
           wget https://pypi.python.org/packages/41/7a/6048de44c62fc5e618178ef9888850c3773a9e4be249e5e673ebce0402ff/h5py-2.7.1.tar.gz
           tar zxvf h5py-2.7.1.tar.gz
           cd h5py-2.7.1
-          export CC=mpicc
           python setup.py configure --mpi
           python setup.py install
       - name: Run test Linalg 
