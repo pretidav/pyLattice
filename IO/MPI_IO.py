@@ -70,17 +70,19 @@ class Writer():
             exit(1)
        
         flat_glob_idx = np.array([i for i in range(np.prod(self.lattice.grid*self.cartesiancomm.mpigrid))])
-        
+
+        #pprint(self.cartesiancomm.comm,flat_glob_idx)
         for idx in np.ndindex(tuple(self.lattice.grid)):
             coor = self.cartesiancomm.mpicoord
             glob_idx = [] 
             glob_dim = []
-            for d in range(self.lattice.dimensions): 
+            for d in reversed(range(self.lattice.dimensions)): 
                 glob_idx.extend( [idx[d],coor[d]] )
                 glob_dim.extend( [self.lattice.grid[d],self.cartesiancomm.mpigrid[d]])
             glob_idx = tuple(glob_idx)
             glob_dim = tuple(glob_dim)
-            glob_idx_serialized = np.ravel_multi_index(glob_idx, glob_dim,order='F') #FIXME need test ordering
+            glob_idx_serialized = np.ravel_multi_index(glob_idx, glob_dim,order='F')
+            #print('idx {} coor {} serial {} value[{}]={}'.format(idx,coor,glob_idx_serialized,idx,self.lattice.value[self.lattice.get_idx(idx)]))
             dset[glob_idx_serialized]=self.lattice.value[self.lattice.get_idx(idx)]
         file.close()
      
@@ -126,12 +128,12 @@ class Reader():
             coor = self.cartesiancomm.mpicoord
             glob_idx = [] 
             glob_dim = []
-            for d in range(self.lattice.dimensions): 
+            for d in reversed(range(self.lattice.dimensions)): 
                 glob_idx.extend( [idx[d],coor[d]] )
                 glob_dim.extend( [self.lattice.grid[d],self.cartesiancomm.mpigrid[d]])
             glob_idx = tuple(glob_idx)
             glob_dim = tuple(glob_dim)
-            glob_idx_serialized = np.ravel_multi_index(glob_idx, glob_dim,order='F') #FIXME need test ordering
+            glob_idx_serialized = np.ravel_multi_index(glob_idx, glob_dim,order='F') 
             self.lattice.value[self.lattice.get_idx(idx)] = list(file['value'])[glob_idx_serialized]
         return self.lattice        
         

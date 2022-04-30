@@ -23,7 +23,7 @@ def test_latticereal():
 def test_latticecomplex():
     Lattice = LatticeComplex(grid=grid, cartesiancomm=CC)
     Lattice.fill_value(n=np.array(
-        [1.1, 1.2j, 1.3, 1.4j, 1.5, 1.6j, 1.7, 1.8j, 1.9], dtype='complex64'))
+        [1.1, 1.2j, 1.3, 1.4j, 1.5, 1.6j, 1.7, 1.8j, 1.9], dtype='complex64')+CC.rank)
     
     W = Writer(lattice=Lattice,cartesiancomm=CC)
     R = Reader(cartesiancomm=CC)
@@ -87,7 +87,7 @@ def test_latticecomplexvector():
 def test_latticerealvectormatrix():
     Lattice = LatticeVectorRealMatrix(grid=grid, cartesiancomm=CC, N=2, Nd=2)
     test = np.reshape(
-        np.array([int(i) for i in range(3*3*2*2*2)], dtype='float32'), (9, 2, 2, 2))
+        np.array([int(i) for i in range(3*3*2*2*2)], dtype='float32')+CC.rank, (9, 2, 2, 2))
 
     Lattice.fill_value(n=test)
     W = Writer(lattice=Lattice,cartesiancomm=CC)
@@ -102,7 +102,7 @@ def test_latticecomplexvectormatrix():
     Lattice = LatticeVectorComplexMatrix(
         grid=grid, cartesiancomm=CC, N=2, Nd=2)
     test = np.reshape(np.array([complex(i) for i in range(
-        3*3*2*2*2)], dtype='complex64'), (9, 2, 2, 2))
+        3*3*2*2*2)], dtype='complex64')+CC.rank, (9, 2, 2, 2))
 
     Lattice.fill_value(n=test)
     W = Writer(lattice=Lattice,cartesiancomm=CC)

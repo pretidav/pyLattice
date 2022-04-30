@@ -1,5 +1,7 @@
 __pycache__/*
 .vscode/settings.json
 */__pycache__/*
-IO/parallel_test.hdf5
+IO/*.hdf5
 ising.png
+docs/notes.out
+*.hdf5

@@ -32,7 +32,7 @@ class LatticeBase():
         # for d in reversed(range(len(self.grid)-1)):
         #    idx *= self.grid[d]
         #    idx += x[d]
-        idx = np.ravel_multi_index(x,tuple(self.grid),order='F')  # FIXME need test ordering
+        idx = np.ravel_multi_index(x,tuple(self.grid),order='C')  
         return idx
 
     def get_tensor_idx(self, idx: np.ndarray):
