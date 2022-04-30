@@ -2,7 +2,7 @@
 
 # pyLattice
 <p align="center">
-  <img width="150" height="150" src="https://github.com/pretidav/pyLattice/raw/feature/parallelIO/fig/mylogo.png">
+  <img width="150" height="150" src="https://github.com/pretidav/pyLattice/raw/main/fig/mylogo.png">
 </p>
 A lattice (gauge) theory simulation library in python.  
 
