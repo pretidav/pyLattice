@@ -2,7 +2,11 @@
 
 # pyLattice
 A lattice (gauge) theory simulation library in python.  
-![Image](https://github.com/pretidav/pyLattice/raw/feature/parallelIO/fig/mylogo.png=800x600)
+
+<p align="center">
+  <img width="460" height="300" src=(https://github.com/pretidav/pyLattice/raw/feature/parallelIO/fig/mylogo.png">
+</p>
+
 # Ising Model 
 
 ~~~
