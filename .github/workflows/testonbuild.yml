@@ -25,4 +25,5 @@ jobs:
         run:  python test_lattice_EO.py    
       - name: Run test MPI Lattice 
         run:  mpiexec -n 2 python test_lattice_mpi.py
+        
       

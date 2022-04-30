@@ -1,7 +1,12 @@
 [![Run Python Tests](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml/badge.svg)](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml)
 
 # pyLattice
+<p align="center">
+  <img width="150" height="150" src="https://github.com/pretidav/pyLattice/raw/main/fig/mylogo.png">
+</p>
 A lattice (gauge) theory simulation library in python.  
+
+
 
 # Ising Model 
 
@@ -55,4 +60,29 @@ This number can be checked with
 ~~~
 import psutil 
 print(psutil.cpu_count(logical=False))
+~~~
+
+## HDF5 installation 
+
+~~~
+conda install -c conda-forge "h5py>=2.9=mpi*"
+~~~
+
+Run test script 
+
+~~~
+cd IO/
+mpiexec -n 4 python demo.py
+~~~
+
+check hdf5 file output structure with 
+
+~~~
+h5dump -n parallel_test.hdf5
+~~~
+
+and inspect it with 
+
+~~~
+h5dump -D /test parallel_test.hdf5
 ~~~

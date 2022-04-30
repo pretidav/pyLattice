@@ -2,3 +2,4 @@ numpy
 matplotlib
 mpi4py
 pytest
+psutil

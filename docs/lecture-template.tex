@@ -1,0 +1,127 @@
+\documentclass[10pt]{article}
+\usepackage{graphicx}
+\usepackage{pst-node,pst-tree,pstricks}
+\usepackage{amssymb,amsmath}
+\usepackage{hyperref}
+
+% environments shortcuts
+\newcommand{\beq}{\begin{equation}}
+\newcommand{\eeq}{\end{equation}}
+\newcommand{\beqa}{\begin{eqnarray}}
+\newcommand{\eeqa}{\end{eqnarray}}
+\newcommand{\beqas}{\begin{eqnarray*}}
+\newcommand{\eeqas}{\end{eqnarray*}}
+
+\newcommand{\bit}{\begin{itemize}}
+\newcommand{\eit}{\end{itemize}}
+\newcommand{\bits}{\begin{itemize*}}
+\newcommand{\eits}{\end{itemize*}}
+\newenvironment{enumerate*}{\begin{enumerate}
+    \setlength{\topsep}{0ex}
+    \setlength{\parskip}{0ex}
+    \setlength{\partopsep}{-1ex}
+    \setlength{\itemsep}{0pt}
+    \setlength{\parsep}{0ex}}
+{\end{enumerate}}
+
+\newcommand{\benum}{\begin{enumerate*}}
+\newcommand{\eenum}{\end{enumerate*}}
+%\newcommand{\benums}{\begin{enumerate*}}
+%\newcommand{\eenums}{\end{enumerate*}}
+\newcommand{\mybullet}{$\bullet$}
+
+% math mode commands
+
+\newcommand{\fracpartial}[2]{\frac{\partial #1}{\partial  #2}}
+\newcommand{\rrr}{{\mathbb R}}
+\newcommand{\bigOO}{{\cal O}}
+\newcommand{\dataset}{{\cal D}}
+
+\newcommand{\X}{\mathbf{X}}
+\newcommand{\calB}{\mathcal{B}}
+\newcommand{\calF}{\mathcal{F}}
+\newcommand{\calG}{\mathcal{G}}
+\newcommand{\calN}{\mathcal{N}}
+\newcommand{\calT}{\mathcal{T}}
+\newcommand{\calH}{\mathcal{H}}
+
+\newcommand{\trace}{\operatorname{trace}}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\sign}{\operatorname{sgn}}
+\newcommand{\onevector}{{\mathbf 1}}
+\newcommand{\bbone}[1]{{\mathbf 1}_{[#1]}}
+
+\newcommand {\argmax}[2]{\mbox{\raisebox{-1.7ex}{$\stackrel{\textstyle{\rm #1}}{\scriptstyle #2}$}}\,}  % to replace with the amsmath construction
+
+\newlength{\picwi}
+\newcommand{\backskip}{\hspace{-2.5em}} % how much to skip back for an empty item?
+
+% Set up some colors
+\definecolor{myblue}{rgb}{0.14,0.11,0.49}
+\definecolor{myred}{rgb}{0.74,0.1,0.05}
+\definecolor{mygreen}{rgb}{0.,0.52,0.32}
+\definecolor{myyellow}{rgb}{0.96,0.92,0.13}
+\definecolor{myorange}{rgb}{0.7,0.41,0.1}
+\definecolor{mypurple}{rgb}{0.51,0.02,.8}
+\definecolor{mygray}{rgb}{0.6,0.6,0.6}
+
+\newcommand{\myblue}[1]{\textcolor{myblue}{#1}}
+\newcommand{\myred}[1]{\textcolor{myred}{#1}}
+\newcommand{\mygreen}[1]{\textcolor{mygreen}{#1}}
+\newcommand{\myorange}[1]{\textcolor{myorange}{#1}}
+\newcommand{\myyellow}[1]{\textcolor{myellow}{#1}}
+\newcommand{\mypurple}[1]{\textcolor{mypurple}{#1}}
+\newcommand{\mygray}[1]{\textcolor{mygray}{#1}}
+
+
+% Stlyle stuff
+% notes are for students , \notes with \mmp{} are for me
+
+\newcommand{\comment}[1]{}
+\newcommand{\mmp}[1]{\emph MMP: {#1}}
+\newcommand{\mydef}[1]{\myred{\bf {#1}}}
+\newcommand{\myemph}[1]{\mygreen{ {#1}}}
+\newcommand{\mycode}[1]{\myblue{\tt {#1}}}
+\newcommand{\myexe}[1]{{\small \mypurple{Exercise} {#1}}}
+
+\newcommand{\reading}[2]{{\small \myemph{{\bf Reading} CRLS:} {#1}, \myemph{Python APPB4AWD} {#2}}}
+
+
+\begin{document}
+\begin{Large}
+\centerline{STAT 534}
+\centerline{Lecture  }  % lecture number here
+\centerline{\bf }       % lecture title here
+\centerline{}      %date here
+\end{Large}
+
+\centerline{\large \copyright 2019 Marina Meil\u{a}}
+\centerline{\large mmp@stat.washington.edu}
+\centerline{\large Scribes: }  % your name here
+
+\vspace{2em}
+\section{A Section}
+Thank you for taking notes in Stat 534!
+
+This is a latex template, in which you can enter the lecture notes taken in class. 
+
+I will go over these notes once you have edited them; to help me, please do this. Please read the preamble of the .tex file, and use the commands in it to make the text more easily editable. In particular
+\bit
+\item Write \mydef{definitions} using the {\tt \\mydef{}} command.
+\item Write the occasional \mycode{python code} using the {\tt \\mycode{}} commend. Note that I always post the python examples on the web page so you don't need to copy them down. 
+\item Format and label equations like this
+  \beq \label{eq:markov-prop}
+X_t\;\perp\;X_{t-k}\;|X_{t-1}\;\text{for}\;\text{all}\;k>1
+\eeq
+\item Coordinate to produce a single latex file for me.
+\item \mydef{Including illustrations} is optional. I am providing the .tex files for my illustrations if you would like to use them to illustrate the examples in class. You should compile the illustrations separately to .pdf or another image format before including them in the lecture notes with \verb!\includegraphics{}!.
+
+  Many figures are done with the {\tt pstricks} latex package, which does not work with {\tt pdflatex}. To compile to pdf use the commands in \href{https://www.stat.washington.edu/mmp/courses/stat534/spring19/Handouts/latex2pdf.bat}{\tt latex2pdf.bat}. In a {\tt bash} shell you can type {\tt ./latex2pdf.bat mytexfile} (do not include the {\tt .tex} file extension!!. For example, to obtain {\tt sh4.1-example-tree.pdf} I typed
+  \\
+    {\tt ./latex2pdf.bat sh4.1-example-tree}
+  
+\eit
+
+
+
+\end{document}
