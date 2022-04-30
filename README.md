@@ -4,7 +4,7 @@
 A lattice (gauge) theory simulation library in python.  
 
 <p align="center">
-  <img width="460" height="300" src=(https://github.com/pretidav/pyLattice/raw/feature/parallelIO/fig/mylogo.png">
+  <img width="100" height="100" src=https://github.com/pretidav/pyLattice/raw/feature/parallelIO/fig/mylogo.png">
 </p>
 
 # Ising Model 
