@@ -1,11 +1,12 @@
 [![Run Python Tests](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml/badge.svg)](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml)
 
 # pyLattice
-A lattice (gauge) theory simulation library in python.  
-
 <p align="center">
   <img width="150" height="150" src="https://github.com/pretidav/pyLattice/raw/feature/parallelIO/fig/mylogo.png">
 </p>
+A lattice (gauge) theory simulation library in python.  
+
+
 
 # Ising Model 
 
