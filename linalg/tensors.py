@@ -269,7 +269,6 @@ class ComplexMatrix(RealMatrix):
             out = VectorComplex(Nd=self.N)
             assert(self.value.shape[1] == rhs.value.shape[0])
             out.value = np.dot(self.value, rhs.value)
-        elif isinstance(rhs, )
         return out
 
     def __rmul__(self, lhs):

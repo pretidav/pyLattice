@@ -86,4 +86,8 @@ class SU2Field(LatticeVectorComplexMatrix):
                 self.value[i,mu,:,:] = np.dot(X,self.value[i,mu,:,:])
     
     def Staple(self): 
-        
+        exit(1)
+    def Plaq(self):
+        exit(1)
+    def Action(self): 
+        exit(1)
