@@ -1,7 +1,12 @@
 import numpy as np
 
+def Kroneker(i,j): 
+    if i==j: 
+        return 1
+    else: 
+        return 0 
 
-class Real():
+class Real():    
     def __init__(self, value: float = 0):
         self.value = np.array([value], dtype=float)
 
@@ -21,7 +26,7 @@ class Real():
             out.value = lhs + self.value
         return out
 
-    def __sub__(self, rhs):
+    def __sub__(self, rhs):        
         out = Real()
         if isinstance(rhs, Real):
             out.value = self.value - rhs.value
@@ -194,7 +199,7 @@ class ComplexMatrix(RealMatrix):
         return out
 
     def adj(self):
-        tmp = ComplexMatrix(self.N)
+        #tmp = ComplexMatrix(self.N)
         tmp = self.conj()
         return tmp.transpose()
 
@@ -250,19 +255,39 @@ class ComplexMatrix(RealMatrix):
         return out
 
     def __mul__(self, rhs):
-        if isinstance(rhs, RealMatrix):
-            out = RealMatrix(self.N)
+        if isinstance(rhs, (RealMatrix,ComplexMatrix)):
+            out = ComplexMatrix(self.N)
             assert(self.value.shape[1] == rhs.value.shape[0])
             out.value = np.dot(self.value, rhs.value)
         elif isinstance(rhs, (Complex, Real)):
-            out = RealMatrix(self.N)
+            out = ComplexMatrix(self.N)
             out.value = self.value*rhs.value
-        elif isinstance(rhs, VectorComplex):
+        elif isinstance(rhs,(complex,float,int)): 
+            out = ComplexMatrix(self.N)
+            out.value = self.value*rhs
+        elif isinstance(rhs, (VectorComplex,VectorReal)):
             out = VectorComplex(Nd=self.N)
             assert(self.value.shape[1] == rhs.value.shape[0])
             out.value = np.dot(self.value, rhs.value)
+        elif isinstance(rhs, )
         return out
 
+    def __rmul__(self, lhs):
+        if isinstance(lhs, (RealMatrix,ComplexMatrix)):
+            out = ComplexMatrix(self.N)
+            assert(self.value.shape[1] == lhs.value.shape[0])
+            out.value = np.dot(lhs.value,self.value)
+        elif isinstance(lhs, (Complex, Real)):
+            out = ComplexMatrix(self.N)
+            out.value = lhs.value*self.value
+        elif isinstance(lhs,(complex,float,int)): 
+            out = ComplexMatrix(self.N)
+            out.value = lhs*self.value
+        elif isinstance(lhs, (VectorComplex,VectorReal)):
+            out = VectorComplex(Nd=self.N)
+            assert(self.value.shape[1] == lhs.value.shape[0])
+            out.value = np.dot(lhs.value,self.value)
+        return out
 
 class VectorReal():
     def __init__(self, Nd: int = None, value: np.ndarray = None):

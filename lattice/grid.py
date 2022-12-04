@@ -212,6 +212,16 @@ class LatticeComplex(LatticeMPI):
     def average(self):
         return super().Average(value=self.value, dtype='complex64')
 
+    def im(self): 
+        out = LatticeReal(grid=self.grid, cartesiancomm=self.cartesiancomm)
+        out.value = np.imag(self.value)
+        return out
+
+    def re(self): 
+        out = LatticeReal(grid=self.grid, cartesiancomm=self.cartesiancomm)
+        out.value = np.real(self.value)
+        return out
+
     def __add__(self, rhs):
         out = LatticeComplex(grid=self.grid, cartesiancomm=self.cartesiancomm)
         if isinstance(rhs, (LatticeReal, LatticeComplex)):
@@ -528,7 +538,7 @@ class LatticeVectorReal(LatticeMPI):
         elif isinstance(rhs, Real):
             out = LatticeVectorReal(
                 grid=self.grid, cartesiancomm=self.cartesiancomm, Nd=self.Nd)
-            out.value = self.value * rhs.value
+            out.value = self.value * rhs.value    
         return out
 
 
