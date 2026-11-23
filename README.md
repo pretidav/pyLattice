@@ -1,4 +1,4 @@
-[![Run Python Tests](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml/badge.svg)](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml)
+[![Run Python Tests](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml/badge.svg?branch=refactor-SU2)](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml)
 
 # pyLattice
 <p align="center">
@@ -24,12 +24,17 @@ MatrixField2 = LatticeRealMatrix(lattice=Grid,N=2)
 (MatrixField*MatrixField2).reducesum()
 
 @ Intel(R) Core(TM) i5-8365U CPU @ 1.60GHz
-
-Thread(s) per core:  2
-Core(s) per socket:  4
+  (4 cores, 2 threads per core)
+@ Apple M4 Pro (10 performance + 4 efficiency cores)
 ~~~
 
-![alt text](https://github.com/pretidav/pyLattice/raw/main/fig/perf.png)
+Strong scaling at fixed global size, best of 3 runs. "Naive" is a plain per-site `np.dot` loop without MPI.
+
+~~~
+mpiexec -np 4 python performance_evaluation.py --mpigrid=2x2x1x1
+~~~
+
+![Performance comparison: Intel i5-8365U vs Apple M4 Pro](fig/perf_compare.png)
 
 
 ## macOS installation (Apple Silicon, conda-forge)

@@ -1,5 +1,5 @@
 from linalg.tensors import ComplexMatrix
-from lattice.grid import LatticeVectorComplexMatrix, LatticeVectorReal, LatticeComplexMatrix, ComplexMatrix, VectorReal
+from lattice.grid import LatticeVectorComplexMatrix, LatticeVectorReal, LatticeComplexMatrix, ComplexMatrix, VectorReal, VectorComplex
 
 import numpy as np 
 from scipy.linalg import expm
@@ -34,7 +34,7 @@ def unitarize(input):
 
 def ProjToAlgebra(input):
     adj_dim = 3    
-    return VectorReal(value = np.array([ (-2.0j*get_generator(a)*input).trace().value[0] for a in range(adj_dim)]))
+    return VectorComplex(value = np.array([ (-2.0j*get_generator(a)*input).trace().value[0] for a in range(adj_dim)]))
 
 def ExpProjToGroup(input):
     T = np.array([get_generator(a).value for a in range(input.Nd)])
@@ -70,10 +70,10 @@ class SU2Field(LatticeVectorComplexMatrix):
 
     def tepid_lie_algebra_vector(self,eps): 
         r = np.zeros(shape=4)
-        r[0]  = np.random.random(size=1)-0.5
+        r[0]  = np.random.random()-0.5
         r[1:] = random_lie_algebra_vector().value
         r[0] =np.sign(r[0])*np.sqrt(1-float(eps)*float(eps)) 
-        r[1:]=float(eps)*r[1:]/np.dot(r[1:],r[1:])
+        r[1:]=float(eps)*r[1:]/np.linalg.norm(r[1:])    # |r[1:]| = eps, so r0^2 + |r[1:]|^2 = 1
         return r
 
     def metropolis_update(self,eps=0.001): 
@@ -82,7 +82,7 @@ class SU2Field(LatticeVectorComplexMatrix):
                 r = self.tepid_lie_algebra_vector(eps)
                 X = np.eye(self.N,dtype=complex)*r[0]
                 for a in range(self.adj_dim):
-                    X += (get_generator(a)*r[a+1]*1j).value
+                    X += (get_generator(a)*r[a+1]*2j).value     # generators are sigma/2: X = r0 + i r.sigma is in SU(2)
                 self.value[i,mu,:,:] = np.dot(X,self.value[i,mu,:,:])
     
     def Staple(self): 
