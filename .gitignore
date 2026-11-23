@@ -4,3 +4,12 @@ __pycache__/*
 ising.png
 docs/notes.out
 *.hdf5
+pylattice/core/__pycache__/__init__.cpython-311.pyc
+pylattice/core/__pycache__/cli.cpython-311.pyc
+pylattice/core/__pycache__/grid.cpython-311.pyc
+pylattice/core/__pycache__/parallel.cpython-311.pyc
+pylattice/core/__pycache__/tensors.cpython-311.pyc
+pylattice/theories/__pycache__/__init__.cpython-311.pyc
+pylattice/theories/spin/__pycache__/__init__.cpython-311.pyc
+pylattice/theories/spin/__pycache__/ising.cpython-311.pyc
+*.png

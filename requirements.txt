@@ -4,3 +4,4 @@ mpi4py
 pytest
 psutil
 rich
+plot_style @ git+https://github.com/pretidav/plot_style.git

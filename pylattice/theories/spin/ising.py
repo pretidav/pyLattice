@@ -3,6 +3,7 @@ import numpy as np
 from copy import copy
 from pylattice.core.parallel import CartesianComm, pprint, pplot
 from pylattice.core.cli import Parser, Logger
+from rich.progress import Progress, BarColumn, MofNCompleteColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 
 class IsingField(LatticeReal):
     def __init__(self,grid,cartesiancomm, initialization='cold', seed = 0): 
@@ -34,9 +35,11 @@ class IsingModel():
     def magnetization(self): 
         return self.field.average()
     
-    def energy(self): 
+    def energy(self):
+        # H = -sum_<ij> s_i s_j, energy per site. local_E sums s_i * (neighbours) over the sites,
+        # which counts every bond twice
         self.local_E = self.local_energy(input_field=self.field)
-        return self.local_E.average()
+        return -0.5*self.local_E.average()
 
     def get_nn_field(self): 
         out = LatticeVectorReal(grid=self.field.grid,cartesiancomm=self.field.cartesiancomm, Nd=len(self.field.grid)*2)
@@ -53,6 +56,8 @@ class IsingModel():
         return out
 
     def local_energy(self,input_field):
+        # s_i * (sum of the 2d neighbours of i), with the neighbours taken from self.nn_field:
+        # self.nn_field must be up to date with the configuration of the neighbours
         local_E = IsingField(grid=input_field.grid, cartesiancomm=input_field.cartesiancomm)
         local_E.fill_value(n=0)
         for mu in range(len(input_field.grid)): 
@@ -60,16 +65,18 @@ class IsingModel():
         return local_E
     
     def global_update(self):
-        #Even Update 
-        delta_energy = self.local_energy(self.field)*(-2)
+        # energy change of flipping each spin, H = -sum_<ij> s_i s_j:  dE_i = 2 s_i sum_nn s_j
+        #Even Update
+        delta_energy = self.local_energy(self.field)*2
         delta_energy_E, _ = delta_energy.peek_EO_lattices()
         field_E, _ = self.field.peek_EO_lattices()
         acc_E = self.metropolis_test(deltaE = delta_energy_E)
         field_E.value[:]=np.where(acc_E,field_E.value*-1,field_E.value)
         self.field.poke_EO_lattices(E_lattice=field_E)
 
-        #Odd Update
-        delta_energy = self.local_energy(self.field)*(-2)
+        #Odd Update (its neighbours are the even spins just updated)
+        self.nn_field = self.get_nn_field()
+        delta_energy = self.local_energy(self.field)*2
         _,delta_energy_O = delta_energy.peek_EO_lattices()
         _, field_O = self.field.peek_EO_lattices()
         acc_O = self.metropolis_test(deltaE = delta_energy_O)
@@ -83,29 +90,35 @@ class IsingModel():
 
     def metropolis_test(self,deltaE):
         rng = np.random.random(size=len(deltaE.value)) 
-        r = np.minimum(1, np.exp(-deltaE.value)/self.beta)    
+        r = np.minimum(1, np.exp(-self.beta*deltaE.value))
         acc_matrix = rng <= r 
         return acc_matrix 
         
-    def run_mc(self,steps,online_obs=False):
-        pprint(comm=self.field.cartesiancomm.comm, msg='--- epoch: {}'.format(0))
-        if online_obs==True: 
-            m = self.magnetization()
-            e = self.energy()
-            self.mlist.append(m)
-            self.elist.append(e)
-            self.nlist.append(0)
-        for n in range(steps): 
-            acc = self.global_update()
-            pprint(comm=self.field.cartesiancomm.comm, msg='--- epoch: {}'.format(n+1))
-            if online_obs==True:
-                mean_acc = self.field.Average(value=acc, dtype='float32')
+    def run_mc(self,steps,online_obs=False,progress=True):
+        """steps sweeps (each updates every spin once). online_obs: record magnetization, energy
+        per site and acceptance after every sweep. progress: progress bar, drawn by rank 0 only."""
+        bar = Progress(TextColumn('[progress.description]{task.description}'), BarColumn(), MofNCompleteColumn(),
+                       TimeElapsedColumn(), TimeRemainingColumn(),
+                       disable=not (progress and self.field.cartesiancomm.comm.Get_rank() == 0))
+        with bar:
+            task = bar.add_task('MONTE CARLO', total=steps)
+            if online_obs==True: 
                 m = self.magnetization()
                 e = self.energy()
                 self.mlist.append(m)
                 self.elist.append(e)
-                self.nlist.append(n)
-                self.acclist.append(float(mean_acc))
+                self.nlist.append(0)
+            for n in range(steps): 
+                acc = self.global_update()
+                if online_obs==True:
+                    mean_acc = self.field.Average(value=acc, dtype='float32')
+                    m = self.magnetization()
+                    e = self.energy()
+                    self.mlist.append(m)
+                    self.elist.append(e)
+                    self.nlist.append(n+1)
+                    self.acclist.append(float(mean_acc))
+                bar.advance(task)
 
     def plot_mc(self): 
         if len(self.mlist)+len(self.elist)+len(self.nlist)>0:

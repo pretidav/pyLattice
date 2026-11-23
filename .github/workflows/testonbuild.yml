@@ -30,5 +30,9 @@ jobs:
         run:  python tests/core/test_grid_eo.py
       - name: Run test MPI Lattice
         run:  mpiexec -n 2 python tests/core/test_grid_mpi.py
+      - name: Run test Ising
+        run:  pytest tests/theories/spin/test_ising.py
+      - name: Run test Ising in parallel
+        run:  mpiexec -n 2 python tests/theories/spin/test_ising.py
 
 

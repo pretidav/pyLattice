@@ -8,7 +8,8 @@ version = "0.1.0"
 description = "A lattice (gauge) theory simulation library in python, parallel with MPI"
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = ["numpy", "scipy", "matplotlib", "mpi4py", "psutil", "rich"]
+dependencies = ["numpy", "scipy", "matplotlib", "mpi4py", "psutil", "rich",
+                "plot_style @ git+https://github.com/pretidav/plot_style.git"]
 
 [project.optional-dependencies]
 # needed by pylattice.core.hdf5io; it must be built with parallel HDF5 (see the README)

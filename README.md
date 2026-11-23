@@ -60,9 +60,11 @@ Tested on macOS with an Apple Silicon (arm64) Mac. Everything comes from conda-f
 conda create -n pylattice -c conda-forge --override-channels \
   python=3.11 numpy scipy matplotlib psutil pytest rich openmpi mpi4py "h5py=*=mpi_openmpi*"
 conda activate pylattice
+pip install "plot_style @ git+https://github.com/pretidav/plot_style.git"   # style of the figures, not on conda
 ~~~
 
 - `--override-channels` makes conda use only conda-forge and ignore the channels in your conda config. This avoids mixing packages from different channels.
+- `plot_style` is not on conda-forge: it is installed from GitHub with `pip`, also by `pip install -r requirements.txt`.
 - `pip install -r requirements.txt` alone is not enough: the standard `h5py` wheels from PyPI have no parallel HDF5 (`mpio`) support, and `scipy` and `h5py` are not listed in `requirements.txt`.
 
 Check the installation:
@@ -74,6 +76,8 @@ pytest tests/core/test_tensors.py
 python tests/core/test_grid.py
 mpiexec -n 2 python tests/core/test_grid_mpi.py
 mpiexec -n 4 python tests/core/test_hdf5io.py
+pytest tests/theories/spin/test_ising.py
+mpiexec -n 2 python tests/theories/spin/test_ising.py      # same checks on a lattice split over 2 (or 1, 4) ranks
 ~~~
 
 `test_hdf5io.py` uses a 2x2 process grid, so it needs exactly 4 processes. On a Mac with fewer than 4 physical cores, add `--oversubscribe` to `mpiexec`.
