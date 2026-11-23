@@ -32,7 +32,33 @@ Core(s) per socket:  4
 ![alt text](https://github.com/pretidav/pyLattice/raw/main/fig/perf.png)
 
 
-## MPI installation 
+## macOS installation (Apple Silicon, conda-forge)
+
+Tested on macOS with an Apple Silicon (arm64) Mac. Everything comes from conda-forge, so MPI, HDF5, `mpi4py` and `h5py` are built against each other and no `apt-get` or manual OpenMPI build is needed.
+
+~~~
+conda create -n pylattice -c conda-forge --override-channels \
+  python=3.11 numpy scipy matplotlib psutil pytest openmpi mpi4py "h5py=*=mpi_openmpi*"
+conda activate pylattice
+~~~
+
+- `--override-channels` makes conda use only conda-forge and ignore the channels in your conda config. This avoids mixing packages from different channels.
+- `pip install -r requirements.txt` alone is not enough: the standard `h5py` wheels from PyPI have no parallel HDF5 (`mpio`) support, and `scipy` and `h5py` are not listed in `requirements.txt`.
+
+Check the installation:
+
+~~~
+python -c "import h5py; print(h5py.get_config().mpi)"   # must print True
+export PYTHONPATH=.          # run from the repository root
+pytest tests/test_linalg.py
+python tests/test_lattice.py
+mpiexec -n 2 python tests/test_lattice_mpi.py
+mpiexec -n 4 python tests/test_mpi_io.py
+~~~
+
+`test_mpi_io.py` uses a 2x2 process grid, so it needs exactly 4 processes. On a Mac with fewer than 4 physical cores, add `--oversubscribe` to `mpiexec`.
+
+## MPI installation (Linux)
 
 ### install OpenMPI 
 if c++ compiler is not present: 

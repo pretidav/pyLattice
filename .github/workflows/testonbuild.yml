@@ -1,9 +1,12 @@
 name: Run Python Tests
 on: [push]
-  
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # tests/ scripts import lattice, linalg, mpi, ... from the repo root
+      PYTHONPATH: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v2
       - uses: mpi4py/setup-mpi@v1
@@ -17,13 +20,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Run test Linalg 
-        run:  pytest test_linalg.py
+      - name: Run test Linalg
+        run:  pytest tests/test_linalg.py
       - name: Run test Lattice
-        run:  python test_lattice.py
+        run:  python tests/test_lattice.py
       - name: Run test LatticeEO
-        run:  python test_lattice_EO.py    
-      - name: Run test MPI Lattice 
-        run:  mpiexec -n 2 python test_lattice_mpi.py
-        
-      
+        run:  python tests/test_lattice_EO.py
+      - name: Run test MPI Lattice
+        run:  mpiexec -n 2 python tests/test_lattice_mpi.py
+
+
