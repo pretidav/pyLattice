@@ -319,6 +319,42 @@ def test_LatticeComplex3D(grid, comm):
         'x'.join([str(a) for a in grid]), 'x'.join([str(a) for a in comm.mpigrid])))
 
 
+def test_shift_direction(grid, comm):
+    # moveforward: the value at x becomes the one at x + mu; movebackward: the one at x - mu
+    # (checked on the global periodic lattice, for every mu, across the MPI grid)
+    G = [g*m for g, m in zip(grid, comm.mpigrid)]
+    glob = np.arange(np.prod(G), dtype='float32').reshape(G)
+    block = tuple(slice(c*g, (c+1)*g) for c, g in zip(comm.mpicoord, grid))
+    Lattice = LatticeReal(grid=grid, cartesiancomm=comm)
+    for mu in range(len(grid)):
+        for move, shift in (('moveforward', -1), ('movebackward', 1)):
+            Lattice.fill_value(n=glob[block].flatten())
+            getattr(Lattice, move)(mu=mu)
+            assert((Lattice.value.reshape(grid) == np.roll(glob, shift, axis=mu)[block]).all())
+    pprint(comm=comm.comm, msg='[+] TEST grid={} mpigrid={}: shift direction passed'.format(
+        'x'.join([str(a) for a in grid]), 'x'.join([str(a) for a in comm.mpigrid])))
+
+
+def test_eo_shift(grid, comm):
+    # even/odd half-lattices across ranks: a field on sublattice p, moved one step along mu, lives
+    # on sublattice 1-p and equals the np.roll of the global periodic lattice there
+    G = [g*m for g, m in zip(grid, comm.mpigrid)]
+    glob = np.random.default_rng(3).standard_normal(G).astype('float32')
+    block = tuple(slice(c*g, (c+1)*g) for c, g in zip(comm.mpicoord, grid))
+    par = np.indices(grid).sum(axis=0).flatten() % 2            # local parity = global parity (even extents)
+    Lattice = LatticeReal(grid=grid, cartesiancomm=comm)
+    for p in (0, 1):
+        for mu in range(len(grid)):
+            for move, roll in (('moveforward', -1), ('movebackward', 1)):
+                Lattice.fill_value(n=glob[block].flatten())
+                H = Lattice.peek_EO_lattices()[p]
+                getattr(H, move)(mu=mu)
+                assert(H.eo_parity == 1 - p)
+                assert((H.value == np.roll(glob, roll, axis=mu)[block].flatten()[par == 1 - p]).all())
+    pprint(comm=comm.comm, msg='[+] TEST grid={} mpigrid={}: even/odd shifts passed'.format(
+        'x'.join([str(a) for a in grid]), 'x'.join([str(a) for a in comm.mpigrid])))
+
+
 if __name__ == '__main__':
     CC = CartesianComm(mpigrid=[2, 1])
     test_LatticeReal2D(grid=[3, 3], comm=CC)
@@ -329,7 +365,17 @@ if __name__ == '__main__':
     test_LatticeComplexVector2D(grid=[3, 3], comm=CC)
     test_LatticeRealVectorMatrix2D(grid=[3, 3], comm=CC)
     test_LatticeComplexVectorMatrix2D(grid=[3, 3], comm=CC)
+    test_shift_direction(grid=[3, 3], comm=CC)
 
     CC = CartesianComm(mpigrid=[2, 1, 1])
     test_LatticeReal3D(grid=[3, 3, 3], comm=CC)
     test_LatticeComplex3D(grid=[3, 3, 3], comm=CC)
+
+    CC = CartesianComm(mpigrid=[1, 2])
+    test_shift_direction(grid=[3, 3], comm=CC)
+
+    CC = CartesianComm(mpigrid=[2, 1])
+    test_eo_shift(grid=[4, 4], comm=CC)
+
+    CC = CartesianComm(mpigrid=[1, 2])
+    test_eo_shift(grid=[4, 4], comm=CC)

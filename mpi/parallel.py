@@ -42,17 +42,23 @@ class CartesianComm():
         return left, right
 
     def forwardshift(self, mu, snd_buf=np.array([1], dtype='float32'), dtype='float32'):
-        rec_buf = snd_buf
+        # Returns the buffer held by the +mu neighbour (send to -mu, receive from +mu),
+        # i.e. the data at x + mu.
+        # Receive into a separate buffer: send and receive buffers must not overlap in MPI.
+        # The datatype is inferred from the arrays (`dtype` is kept only for compatibility).
+        rec_buf = snd_buf.copy()
         l, r = self.find_nn_mpi(mu)
-        self.cartesian.Sendrecv(sendbuf=[snd_buf, self.mpitypes[dtype]], dest=r, sendtag=0,
-                                recvbuf=[rec_buf, self.mpitypes[dtype]], source=l, recvtag=0)
+        self.cartesian.Sendrecv(sendbuf=snd_buf, dest=l, sendtag=0,
+                                recvbuf=rec_buf, source=r, recvtag=0)
         return rec_buf
 
     def backwardshift(self, mu, snd_buf=np.array([1], dtype='float32'), dtype='float32'):
-        rec_buf = snd_buf
+        # Returns the buffer held by the -mu neighbour (send to +mu, receive from -mu),
+        # i.e. the data at x - mu.
+        rec_buf = snd_buf.copy()
         l, r = self.find_nn_mpi(mu)
-        self.cartesian.Sendrecv(sendbuf=[snd_buf, self.mpitypes[dtype]], dest=l, sendtag=0,
-                                recvbuf=[rec_buf, self.mpitypes[dtype]], source=r, recvtag=0)
+        self.cartesian.Sendrecv(sendbuf=snd_buf, dest=r, sendtag=0,
+                                recvbuf=rec_buf, source=l, recvtag=0)
         return rec_buf
 
     def create_comm(self):

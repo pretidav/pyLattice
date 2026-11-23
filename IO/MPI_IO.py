@@ -43,7 +43,7 @@ class Writer():
             file.attrs['ram'] = sys_info['ram']
 
     def write(self,filename): 
-        if filename[:-5]!='.hdf5':
+        if filename[-5:]!='.hdf5':
             filename = filename + '.hdf5'
         file = h5py.File(filename, 'w', driver='mpio', comm=self.cartesiancomm.comm)
        
@@ -93,7 +93,7 @@ class Reader():
         self.lattice = None
 
     def read(self,filename): 
-        if filename[:-5]!='.hdf5':
+        if filename[-5:]!='.hdf5':
             filename = filename + '.hdf5'
         file = h5py.File(filename, 'r', driver='mpio', comm=self.cartesiancomm.comm)
 

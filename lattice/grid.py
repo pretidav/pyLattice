@@ -13,17 +13,24 @@ class LatticeBase():
         self.flat_idx = self.get_flat_idx()
         self.tensor_idx = self.get_tensor_idx(idx=self.flat_idx) 
 
-    def get_EO_idx(self): 
-        E_idx = np.ndarray.flatten(np.ndarray.astype(np.indices(self.grid).sum(axis=0)%2,'bool'))
-        O_idx = np.logical_not(E_idx)
+    def get_EO_idx(self):
+        # the parity is taken from local coordinates: this equals the global parity only if
+        # every local extent is even, so that is required for the checkerboard to be consistent
+        if (self.grid % 2).any():
+            raise ValueError("even/odd decomposition needs every local grid dimension to be even, got {}".format(self.grid.tolist()))
+        # even site: sum of the coordinates is even, so the origin (0,...,0) is even
+        O_idx = np.ndarray.flatten(np.ndarray.astype(np.indices(self.grid).sum(axis=0)%2,'bool'))
+        E_idx = np.logical_not(O_idx)
         return E_idx, O_idx
        
+    # moveforward: the value at x becomes the one that was at x + step*mu
+    # movebackward: the value at x becomes the one that was at x - step*mu
     def moveforward(self, mu, step=1):
-        self.tensor_idx = np.roll(self.tensor_idx, shift=step, axis=mu)
+        self.tensor_idx = np.roll(self.tensor_idx, shift=-step, axis=mu)
         self.update_flat_idx()
 
     def movebackward(self, mu, step=1):
-        self.tensor_idx = np.roll(self.tensor_idx, shift=-step, axis=mu)
+        self.tensor_idx = np.roll(self.tensor_idx, shift=step, axis=mu)
         self.update_flat_idx()
 
     def get_idx(self, x):
@@ -40,7 +47,7 @@ class LatticeBase():
         return out
 
     def get_flat_idx(self):
-        return np.array([i for i in range(np.prod(self.grid))])
+        return np.arange(np.prod(self.grid))
 
     def update_flat_idx(self):
         self.flat_idx = np.ndarray.flatten(self.tensor_idx)
@@ -58,27 +65,12 @@ class LatticeMPI(LatticeBase):
         self.cartesiancomm = cartesiancomm
 
     def moveforward(self, mu, step=1, value=None, dtype='float32'):
+        if step != 1:
+            raise ValueError("only step=1 is supported: the halo exchange moves a single slice")
         dummy_tensor_idx = np.reshape(
-            np.array([i for i in range(np.prod(self.grid))]), self.grid)
-        out = value
-        snd_idx = np.ndarray.flatten(
-            self.pick_last_slice(tensor=dummy_tensor_idx, mu=mu))
-        snd_halo = np.ndarray.flatten(out[snd_idx])
-        new_shape = list(self.grid)
-        new_shape.extend(out.shape[1:])
-        out = np.reshape(np.roll(np.reshape(out, new_shape),
-                         shift=step, axis=mu), out.shape)
-        rcv_halo = self.cartesiancomm.forwardshift(
-            mu, snd_buf=snd_halo, dtype=dtype)
-        rcv_idx = np.ndarray.flatten(
-            self.pick_first_slice(tensor=dummy_tensor_idx, mu=mu))
-        rcv_shape = [len(snd_idx)]+list(out.shape[1:])
-        out[rcv_idx] = np.reshape(rcv_halo, rcv_shape)
-        return out
-
-    def movebackward(self, mu, step=1, value=None, dtype='float32'):
-        dummy_tensor_idx = np.reshape(
-            np.array([i for i in range(np.prod(self.grid))]), self.grid)
+            np.arange(np.prod(self.grid)), self.grid)
+        # value at x becomes the value at x + mu: our first slice goes to the -mu neighbour,
+        # the +mu neighbour's first slice becomes our last slice
         out = value
         snd_idx = np.ndarray.flatten(
             self.pick_first_slice(tensor=dummy_tensor_idx, mu=mu))
@@ -87,10 +79,33 @@ class LatticeMPI(LatticeBase):
         new_shape.extend(out.shape[1:])
         out = np.reshape(np.roll(np.reshape(out, new_shape),
                          shift=-step, axis=mu), out.shape)
-        rcv_halo = self.cartesiancomm.backwardshift(
+        rcv_halo = self.cartesiancomm.forwardshift(
             mu, snd_buf=snd_halo, dtype=dtype)
         rcv_idx = np.ndarray.flatten(
             self.pick_last_slice(tensor=dummy_tensor_idx, mu=mu))
+        rcv_shape = [len(snd_idx)]+list(out.shape[1:])
+        out[rcv_idx] = np.reshape(rcv_halo, rcv_shape)
+        return out
+
+    def movebackward(self, mu, step=1, value=None, dtype='float32'):
+        if step != 1:
+            raise ValueError("only step=1 is supported: the halo exchange moves a single slice")
+        dummy_tensor_idx = np.reshape(
+            np.arange(np.prod(self.grid)), self.grid)
+        # value at x becomes the value at x - mu: our last slice goes to the +mu neighbour,
+        # the -mu neighbour's last slice becomes our first slice
+        out = value
+        snd_idx = np.ndarray.flatten(
+            self.pick_last_slice(tensor=dummy_tensor_idx, mu=mu))
+        snd_halo = np.ndarray.flatten(out[snd_idx])
+        new_shape = list(self.grid)
+        new_shape.extend(out.shape[1:])
+        out = np.reshape(np.roll(np.reshape(out, new_shape),
+                         shift=step, axis=mu), out.shape)
+        rcv_halo = self.cartesiancomm.backwardshift(
+            mu, snd_buf=snd_halo, dtype=dtype)
+        rcv_idx = np.ndarray.flatten(
+            self.pick_first_slice(tensor=dummy_tensor_idx, mu=mu))
         rcv_shape = [len(snd_idx)]+list(out.shape[1:])
         out[rcv_idx] = np.reshape(rcv_halo, rcv_shape)
         return out
@@ -111,6 +126,22 @@ class LatticeReal(LatticeMPI):
         super().__init__(grid=grid, cartesiancomm=cartesiancomm)
         self.value = np.zeros(shape=(np.prod(self.grid)), dtype='float32')
 
+    # Even/odd half-lattices (see peek_EO_lattices): eo_parity is 0 (even sites) or 1 (odd sites),
+    # eo_parent_grid is the grid of the full lattice. Both are None for an ordinary lattice.
+    eo_parity = None
+    eo_parent_grid = None
+
+    def _new(self):
+        # empty lattice of the same shape, keeping the even/odd tags
+        out = LatticeReal(grid=self.grid, cartesiancomm=self.cartesiancomm)
+        out.eo_parity, out.eo_parent_grid = self.eo_parity, self.eo_parent_grid
+        return out
+
+    def _check_eo(self, rhs):
+        if rhs.eo_parity != self.eo_parity:
+            raise ValueError("cannot combine lattices living on different sublattices "
+                             "(even/odd parity {} and {})".format(self.eo_parity, rhs.eo_parity))
+
     def fill_value(self, n=0):
         if isinstance(n, Real):
             self.value[:] = n.value
@@ -120,28 +151,63 @@ class LatticeReal(LatticeMPI):
             self.value = n
 
     def peek_EO_lattices(self):
+        if self.eo_parity is not None:
+            raise ValueError("this is already an even/odd half-lattice")
         E_idx, O_idx = self.get_EO_idx()
-        E_latt = LatticeReal(grid=np.ndarray.astype(self.grid/2,dtype='i'),cartesiancomm=self.cartesiancomm)
-        O_latt = LatticeReal(grid=np.ndarray.astype(self.grid/2,dtype='i'),cartesiancomm=self.cartesiancomm)
+        # Each half holds prod(grid)/2 sites, stored compactly in C order. Every line along the
+        # last axis has exactly grid[-1]/2 sites of each parity, so the storage is a regular array
+        # of shape grid with the last dimension halved.
+        # A half-lattice remembers its parity and its parent grid: moveforward/movebackward
+        # (always one step) hop to the other sublattice, E -> O and O -> E (see _eo_shift).
+        half_grid = self.grid.copy()
+        half_grid[-1] //= 2
+        E_latt = LatticeReal(grid=half_grid,cartesiancomm=self.cartesiancomm)
+        O_latt = LatticeReal(grid=half_grid,cartesiancomm=self.cartesiancomm)
         E_latt.value = self.value[E_idx]
         O_latt.value = self.value[O_idx]
+        E_latt.eo_parity, O_latt.eo_parity = 0, 1
+        E_latt.eo_parent_grid = O_latt.eo_parent_grid = self.grid.copy()
         return E_latt, O_latt
 
     def poke_EO_lattices(self,E_lattice=None,O_lattice=None): 
         E_idx, O_idx = self.get_EO_idx()
-        if E_lattice!=None:
+        for lattice, parity in ((E_lattice, 0), (O_lattice, 1)):
+            if lattice is not None and lattice.eo_parity not in (None, parity):
+                raise ValueError("a lattice living on the {} sites cannot be poked into the {} sites".format(
+                    ('even', 'odd')[lattice.eo_parity], ('even', 'odd')[parity]))
+        if E_lattice is not None:
             self.value[E_idx] = E_lattice.value 
-        if O_lattice!=None:
+        if O_lattice is not None:
             self.value[O_idx] = O_lattice.value
+
+    def _eo_shift(self, mu, step, forward):
+        # Values of this half-lattice (on sublattice eo_parity) as seen from the other sublattice:
+        # put them on the parent lattice, shift it with the (MPI-aware) full-lattice move and read
+        # the result on the opposite parity. forward: value at x + mu, backward: value at x - mu.
+        parent = LatticeReal(grid=self.eo_parent_grid, cartesiancomm=self.cartesiancomm)
+        E_idx, O_idx = parent.get_EO_idx()
+        src, dst = (E_idx, O_idx) if self.eo_parity == 0 else (O_idx, E_idx)
+        full = np.zeros(len(E_idx), dtype=self.value.dtype)
+        full[src] = self.value
+        move = LatticeMPI.moveforward if forward else LatticeMPI.movebackward
+        return move(parent, mu=mu, step=step, value=full)[dst]
 
     def __getitem__(self, idx: int):
         return self.value[idx, :]
 
     def moveforward(self, mu, step=1):
-        self.value = super().moveforward(mu=mu, step=1, value=self.value)
+        if self.eo_parity is not None:
+            self.value = self._eo_shift(mu, step, forward=True)
+            self.eo_parity = 1 - self.eo_parity         # one step always lands on the other sublattice
+        else:
+            self.value = super().moveforward(mu=mu, step=step, value=self.value)
 
     def movebackward(self, mu, step=1):
-        self.value = super().movebackward(mu=mu, step=1, value=self.value)
+        if self.eo_parity is not None:
+            self.value = self._eo_shift(mu, step, forward=False)
+            self.eo_parity = 1 - self.eo_parity
+        else:
+            self.value = super().movebackward(mu=mu, step=step, value=self.value)
 
     def reducesum(self):
         return super().ReduceSum(value=self.value, dtype='float32')
@@ -150,8 +216,9 @@ class LatticeReal(LatticeMPI):
         return super().Average(value=self.value, dtype='float32')
 
     def __add__(self, rhs):
-        out = LatticeReal(grid=self.grid, cartesiancomm=self.cartesiancomm)
+        out = self._new()
         if isinstance(rhs, LatticeReal):
+            self._check_eo(rhs)
             assert(self.value.shape == rhs.value.shape)
             out.value = self.value + rhs.value
         elif isinstance(rhs, Real):
@@ -161,8 +228,9 @@ class LatticeReal(LatticeMPI):
         return out
 
     def __sub__(self, rhs):
-        out = LatticeReal(grid=self.grid, cartesiancomm=self.cartesiancomm)
+        out = self._new()
         if isinstance(rhs, LatticeReal):
+            self._check_eo(rhs)
             assert(self.value.shape == rhs.value.shape)
             out.value = self.value - rhs.value
         elif isinstance(rhs, Real):
@@ -172,8 +240,9 @@ class LatticeReal(LatticeMPI):
         return out
 
     def __mul__(self, rhs):
-        out = LatticeReal(grid=self.grid, cartesiancomm=self.cartesiancomm)
+        out = self._new()
         if isinstance(rhs, LatticeReal):
+            self._check_eo(rhs)
             assert(self.value.shape == rhs.value.shape)
             out.value = self.value * rhs.value
         elif isinstance(rhs, Real):
@@ -200,11 +269,11 @@ class LatticeComplex(LatticeMPI):
         return self.value[idx, :]
 
     def moveforward(self, mu, step=1):
-        self.value = super().moveforward(mu=mu, step=1, value=self.value, dtype='complex64')
+        self.value = super().moveforward(mu=mu, step=step, value=self.value, dtype='complex64')
 
     def movebackward(self, mu, step=1):
         self.value = super().movebackward(
-            mu=mu, step=1, value=self.value, dtype='complex64')
+            mu=mu, step=step, value=self.value, dtype='complex64')
 
     def reducesum(self):
         return super().ReduceSum(value=self.value, dtype='complex64')
@@ -269,10 +338,10 @@ class LatticeRealMatrix(LatticeMPI):
             self.value = n
 
     def moveforward(self, mu, step=1):
-        self.value = super().moveforward(mu=mu, step=1, value=self.value, dtype='float32')
+        self.value = super().moveforward(mu=mu, step=step, value=self.value, dtype='float32')
 
     def movebackward(self, mu, step=1):
-        self.value = super().movebackward(mu=mu, step=1, value=self.value, dtype='float32')
+        self.value = super().movebackward(mu=mu, step=step, value=self.value, dtype='float32')
 
     def __getitem__(self, idx: int):
         return self.value[idx, :]
@@ -360,11 +429,11 @@ class LatticeComplexMatrix(LatticeMPI):
             self.value = n
 
     def moveforward(self, mu, step=1):
-        self.value = super().moveforward(mu=mu, step=1, value=self.value, dtype='complex64')
+        self.value = super().moveforward(mu=mu, step=step, value=self.value, dtype='complex64')
 
     def movebackward(self, mu, step=1):
         self.value = super().movebackward(
-            mu=mu, step=1, value=self.value, dtype='complex64')
+            mu=mu, step=step, value=self.value, dtype='complex64')
 
     def __getitem__(self, idx: int):
         return self.value[idx, :]
@@ -479,10 +548,10 @@ class LatticeVectorReal(LatticeMPI):
             self.value[:] = n
 
     def moveforward(self, mu, step=1):
-        self.value = super().moveforward(mu=mu, step=1, value=self.value, dtype='float32')
+        self.value = super().moveforward(mu=mu, step=step, value=self.value, dtype='float32')
 
     def movebackward(self, mu, step=1):
-        self.value = super().movebackward(mu=mu, step=1, value=self.value, dtype='float32')
+        self.value = super().movebackward(mu=mu, step=step, value=self.value, dtype='float32')
 
     def reducesum(self):
         return super().ReduceSum(value=self.value, dtype='float32')
@@ -555,11 +624,11 @@ class LatticeVectorComplex(LatticeMPI):
             self.value[:] = n
 
     def moveforward(self, mu, step=1):
-        self.value = super().moveforward(mu=mu, step=1, value=self.value, dtype='complex64')
+        self.value = super().moveforward(mu=mu, step=step, value=self.value, dtype='complex64')
 
     def movebackward(self, mu, step=1):
         self.value = super().movebackward(
-            mu=mu, step=1, value=self.value, dtype='complex64')
+            mu=mu, step=step, value=self.value, dtype='complex64')
 
     def reducesum(self):
         return super().ReduceSum(value=self.value, dtype='complex64')
@@ -644,10 +713,10 @@ class LatticeVectorRealMatrix(LatticeMPI):
             self.value = n
 
     def moveforward(self, mu, step=1):
-        self.value = super().moveforward(mu=mu, step=1, value=self.value, dtype='float32')
+        self.value = super().moveforward(mu=mu, step=step, value=self.value, dtype='float32')
 
     def movebackward(self, mu, step=1):
-        self.value = super().movebackward(mu=mu, step=1, value=self.value, dtype='float32')
+        self.value = super().movebackward(mu=mu, step=step, value=self.value, dtype='float32')
 
     def reducesum(self):
         return super().ReduceSum(value=self.value, dtype='float32')
@@ -776,11 +845,11 @@ class LatticeVectorComplexMatrix(LatticeMPI):
             self.value = n
 
     def moveforward(self, mu, step=1):
-        self.value = super().moveforward(mu=mu, step=1, value=self.value, dtype='complex64')
+        self.value = super().moveforward(mu=mu, step=step, value=self.value, dtype='complex64')
 
     def movebackward(self, mu, step=1):
         self.value = super().movebackward(
-            mu=mu, step=1, value=self.value, dtype='complex64')
+            mu=mu, step=step, value=self.value, dtype='complex64')
 
     def reducesum(self):
         return super().ReduceSum(value=self.value, dtype='complex64')

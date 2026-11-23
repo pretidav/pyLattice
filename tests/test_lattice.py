@@ -15,10 +15,10 @@ def test_realfield():
         [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9], dtype='float32'))
     assert((np.abs(Lattice.value -
            np.array([1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9])) < tol).all())
-    Lattice.movebackward(mu=0)
+    Lattice.moveforward(mu=0)
     assert((np.abs(Lattice.value -
            np.array([1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.1, 1.2, 1.3])) < tol).all())
-    Lattice.moveforward(mu=0)
+    Lattice.movebackward(mu=0)
     assert((np.abs(Lattice.value -
            np.array([1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9])) < tol).all())
     assert(np.abs((Lattice.reducesum() - 13.5)) < tol)
@@ -42,10 +42,10 @@ def test_complexfield():
         [1.1, 1.2j, 1.3, 1.4j, 1.5, 1.6j, 1.7, 1.8j, 1.9], dtype='complex64'))
     assert((np.abs(Lattice.value -
            np.array([1.1, 1.2j, 1.3, 1.4j, 1.5, 1.6j, 1.7, 1.8j, 1.9])) < tol).all())
-    Lattice.movebackward(mu=0)
+    Lattice.moveforward(mu=0)
     assert((np.abs(Lattice.value -
            np.array([1.4j, 1.5, 1.6j, 1.7, 1.8j, 1.9, 1.1, 1.2j, 1.3])) < tol).all())
-    Lattice.moveforward(mu=0)
+    Lattice.movebackward(mu=0)
     assert((np.abs(Lattice.value -
            np.array([1.1, 1.2j, 1.3, 1.4j, 1.5, 1.6j, 1.7, 1.8j, 1.9])) < tol).all())
 
