@@ -1,9 +1,10 @@
 from pylattice.core.grid import LatticeReal,LatticeVectorReal
 import numpy as np 
 from copy import copy
-from pylattice.core.parallel import CartesianComm, pprint, pplot
+from pylattice.core.parallel import CartesianComm, pprint
 from pylattice.core.cli import Parser, Logger
-from rich.progress import Progress, BarColumn, MofNCompleteColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
+from pylattice.core import montecarlo
+from pylattice.core.callbacks import Checkpointer, RunLog
 
 class IsingField(LatticeReal):
     def __init__(self,grid,cartesiancomm, initialization='cold', seed = 0): 
@@ -18,14 +19,21 @@ class IsingField(LatticeReal):
         if self.initialization=='cold': 
             self.value[:]=np.ones(shape=self.value.shape,dtype='float32')-2
         if self.initialization=='random': 
-            np.random.seed(seed=self.seed)
-            self.value[:]=np.array(np.random.choice([-1,1],self.value.shape),dtype='float32')
+            # seed: an integer, or a numpy Generator (CartesianComm.rng(seed): one independent stream
+            # per rank, which the model can go on using). The same integer on every rank would give
+            # every rank the same block.
+            rng = np.random.default_rng(self.seed)
+            self.value[:]=np.array(rng.choice([-1,1],self.value.shape),dtype='float32')
 
 class IsingModel():
-    def __init__(self,field,logger,beta):
+    def __init__(self,field,logger,beta,rng=None):
+        """rng: the numpy Generator of this rank for the updates (default: the stream of this rank
+        for seed 0, see CartesianComm.rng); run_mc and sweep use it unless given another."""
         self.beta = beta
         self.log = logger 
         self.field = field  
+        self.rng = rng if rng is not None else field.cartesiancomm.rng(0)
+        self.history = montecarlo.History()
         self.mlist, self.elist, self.nlist, self.acclist = [],[],[], []
         self.M = self.magnetization()
         self.E = 0
@@ -64,13 +72,14 @@ class IsingModel():
             local_E = local_E + (self.nn_field.peek_index(mu) + self.nn_field.peek_index(mu+len(input_field.grid))) * input_field
         return local_E
     
-    def global_update(self):
+    def global_update(self,rng=None):
+        rng = self.rng if rng is None else rng
         # energy change of flipping each spin, H = -sum_<ij> s_i s_j:  dE_i = 2 s_i sum_nn s_j
         #Even Update
         delta_energy = self.local_energy(self.field)*2
         delta_energy_E, _ = delta_energy.peek_EO_lattices()
         field_E, _ = self.field.peek_EO_lattices()
-        acc_E = self.metropolis_test(deltaE = delta_energy_E)
+        acc_E = self.metropolis_test(deltaE = delta_energy_E, rng = rng)
         field_E.value[:]=np.where(acc_E,field_E.value*-1,field_E.value)
         self.field.poke_EO_lattices(E_lattice=field_E)
 
@@ -79,7 +88,7 @@ class IsingModel():
         delta_energy = self.local_energy(self.field)*2
         _,delta_energy_O = delta_energy.peek_EO_lattices()
         _, field_O = self.field.peek_EO_lattices()
-        acc_O = self.metropolis_test(deltaE = delta_energy_O)
+        acc_O = self.metropolis_test(deltaE = delta_energy_O, rng = rng)
         field_O.value[:]=np.where(acc_O,field_O.value*-1,field_O.value)
         self.field.poke_EO_lattices(O_lattice=field_O)
         
@@ -88,45 +97,48 @@ class IsingModel():
 
         return (np.sum(acc_E)+np.sum(acc_O))
 
-    def metropolis_test(self,deltaE):
-        rng = np.random.random(size=len(deltaE.value)) 
-        r = np.minimum(1, np.exp(-self.beta*deltaE.value))
-        acc_matrix = rng <= r 
-        return acc_matrix 
+    def metropolis_test(self,deltaE,rng=None):
+        # the action is beta * H: the change of the action of a flip is beta * dE
+        rng = self.rng if rng is None else rng
+        return montecarlo.metropolis_accept(self.beta*deltaE.value, rng)
         
-    def run_mc(self,steps,online_obs=False,progress=True):
-        """steps sweeps (each updates every spin once). online_obs: record magnetization, energy
-        per site and acceptance after every sweep. progress: progress bar, drawn by rank 0 only."""
-        bar = Progress(TextColumn('[progress.description]{task.description}'), BarColumn(), MofNCompleteColumn(),
-                       TimeElapsedColumn(), TimeRemainingColumn(),
-                       disable=not (progress and self.field.cartesiancomm.comm.Get_rank() == 0))
-        with bar:
-            task = bar.add_task('MONTE CARLO', total=steps)
-            if online_obs==True: 
-                m = self.magnetization()
-                e = self.energy()
-                self.mlist.append(m)
-                self.elist.append(e)
-                self.nlist.append(0)
-            for n in range(steps): 
-                acc = self.global_update()
-                if online_obs==True:
-                    mean_acc = self.field.Average(value=acc, dtype='float32')
-                    m = self.magnetization()
-                    e = self.energy()
-                    self.mlist.append(m)
-                    self.elist.append(e)
-                    self.nlist.append(n+1)
-                    self.acclist.append(float(mean_acc))
-                bar.advance(task)
+    @property
+    def comm(self):
+        return self.field.cartesiancomm.comm
 
-    def plot_mc(self): 
-        if len(self.mlist)+len(self.elist)+len(self.nlist)>0:
-            pplot(comm=self.field.cartesiancomm.comm, x=self.nlist, y=self.mlist, title='Magnetization size={} beta={}'.format(self.field.grid*self.field.cartesiancomm.mpigrid,self.beta), file='./mag.png')
-            pplot(comm=self.field.cartesiancomm.comm, x=self.nlist, y=self.elist, title='Energy density size={} beta={}'.format(self.field.grid*self.field.cartesiancomm.mpigrid,self.beta), file='./ene.png')
-            pplot(comm=self.field.cartesiancomm.comm, x=self.nlist[1:], y=self.acclist, title='Acceptance size={} beta={}'.format(self.field.grid*self.field.cartesiancomm.mpigrid,self.beta), file='./acc.png')
-        else:
-            pprint(comm=self.field.cartesiancomm.comm, msg='[x] NO PLOTS. "online_obs" must be set to True')
+    def sweep(self,rng=None):
+        """one sweep: every spin is tried once. Returns (accepted, attempted) on this rank"""
+        return self.global_update(rng), self.field.value.size
+
+    def observables(self):
+        """magnetization and energy per site (global values)"""
+        return {'m': float(self.magnetization()), 'e': float(self.energy())}
+
+    def run_mc(self,steps,online_obs=False,progress=True,thermalization=0,measure_every=1,callbacks=(),rng=None):
+        """steps sweeps (each tries every spin once), after thermalization sweeps that are not
+        measured. online_obs: record the magnetization and the energy per site (mlist, elist) at
+        sweeps nlist, and the acceptance (acclist), every measure_every sweeps; the same data is in
+        self.history. progress: progress bar, drawn by rank 0 only. callbacks: see
+        pylattice.core.callbacks. rng: the generator of this rank (default self.rng).
+        See pylattice.core.montecarlo."""
+        self.history = montecarlo.run(self, steps, thermalization=thermalization, measure_every=measure_every,
+                                      progress=progress, measure=online_obs, callbacks=callbacks, rng=rng)
+        if online_obs:
+            self.nlist.extend(self.history.sweeps)
+            self.mlist.extend(self.history.values['m'])
+            self.elist.extend(self.history.values['e'])
+            self.acclist.extend(self.history.acceptance)
+
+    def plot_mc(self):
+        """the magnetization, the energy and the acceptance of the last run_mc against the sweep:
+        mag.png, ene.png, acc.png (see History.plot)"""
+        comm = self.field.cartesiancomm.comm
+        if len(self.history) == 0:
+            pprint(comm=comm, msg='[x] NO PLOTS. "online_obs" must be set to True')
+            return
+        tag = 'size={} beta={}'.format(self.field.grid*self.field.cartesiancomm.mpigrid, self.beta)
+        self.history.plot(comm, files={'m': './mag.png', 'e': './ene.png', 'acceptance': './acc.png'},
+                          titles={'m': 'Magnetization ' + tag, 'e': 'Energy density ' + tag, 'acceptance': 'Acceptance ' + tag})
 
 
 def main(argv=None):
@@ -136,12 +148,17 @@ def main(argv=None):
     PP = Parser(argv)
     CC = CartesianComm(mpigrid=PP.mpigrid)
     LL = Logger(debug=PP.debug, logfile=PP.logfile)
-    local_seed = CC.parallel_RNG(seed=PP.seed)
+    rng = CC.rng(PP.seed)                         # an independent stream on every rank
 
-    field = IsingField(grid=PP.grid, cartesiancomm=CC, initialization='random', seed=local_seed)
-    model = IsingModel(field=field, logger=LL.log, beta=PP.beta)
+    field = IsingField(grid=PP.grid, cartesiancomm=CC, initialization='random', seed=rng)
+    model = IsingModel(field=field, logger=LL.log, beta=PP.beta, rng=rng)
 
-    model.run_mc(steps=PP.steps, online_obs=True)
+    callbacks = []
+    if PP.checkpoint_every:
+        callbacks.append(Checkpointer(PP.checkpoint_every, directory='checkpoints', prefix='ising', final=True))
+    if PP.runlog_every:
+        callbacks.append(RunLog(PP.runlog_every, filename='run.log'))
+    model.run_mc(steps=PP.steps, online_obs=True, callbacks=callbacks)
     model.plot_mc()
 
 

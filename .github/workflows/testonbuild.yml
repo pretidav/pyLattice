@@ -30,6 +30,20 @@ jobs:
         run:  python tests/core/test_grid_eo.py
       - name: Run test MPI Lattice
         run:  mpiexec -n 2 python tests/core/test_grid_mpi.py
+      - name: Run test random streams
+        run:  pytest tests/core/test_rng.py
+      - name: Run test random streams in parallel
+        run:  mpiexec -n 2 python tests/core/test_rng.py
+      - name: Run test statistics
+        run:  pytest tests/core/test_stats.py
+      - name: Run test Monte Carlo driver
+        run:  pytest tests/core/test_montecarlo.py
+      - name: Run test Monte Carlo driver in parallel
+        run:  mpiexec -n 2 python tests/core/test_montecarlo.py
+      - name: Run test callbacks (checkpoints and run log)
+        run:  pytest tests/core/test_callbacks.py
+      - name: Run test callbacks in parallel
+        run:  mpiexec -n 2 python tests/core/test_callbacks.py
       - name: Run test Ising
         run:  pytest tests/theories/spin/test_ising.py
       - name: Run test Ising in parallel

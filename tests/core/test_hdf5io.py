@@ -2,6 +2,7 @@ from pylattice.core.hdf5io import Writer, Reader
 from pylattice.core.parallel import CartesianComm
 from pylattice.core.grid import LatticeComplex, LatticeReal, LatticeComplexMatrix, LatticeRealMatrix, LatticeVectorReal, LatticeVectorComplex, LatticeVectorRealMatrix, LatticeVectorComplexMatrix
 import numpy as np
+import pytest
 
 tol = 10e-6
 mpigrid = [2, 2]
@@ -113,6 +114,33 @@ def test_latticecomplexvectormatrix():
     assert(( np.abs(Lattice.value-Lattice2.value)<tol).all()) 
 
 
+class MyField(LatticeReal):
+    pass
+
+
+def test_latticesubclass():
+    # a subclass (an IsingField, an SU2Field) is stored as the lattice class it derives from
+    import h5py
+    Lattice = MyField(grid=grid, cartesiancomm=CC)
+    Lattice.fill_value(n=np.array(
+        [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9], dtype='float32')+CC.rank)
+    W = Writer(lattice=Lattice,cartesiancomm=CC)
+    R = Reader(cartesiancomm=CC)
+    W.write(filename='./test_file')
+    CC.comm.Barrier()
+    with h5py.File('./test_file.hdf5', 'r') as f:
+        assert f.attrs['type'] == 'LatticeReal'
+    Lattice2 = R.read(filename='./test_file')
+    assert type(Lattice2) is LatticeReal
+    assert Lattice2.value.shape == Lattice.value.shape and (np.abs(Lattice.value-Lattice2.value)<tol).all()
+    class NotALattice:
+        grid = np.array(grid)
+    class FakeFile:
+        attrs = {}
+    with pytest.raises(TypeError):                              # something that is not a lattice
+        Writer(lattice=NotALattice(), cartesiancomm=CC).write_header(file=FakeFile())
+
+
 if __name__=='__main__': 
     test_latticereal()
     test_latticecomplex()
@@ -122,3 +150,4 @@ if __name__=='__main__':
     test_latticecomplexvector()
     test_latticerealvectormatrix()
     test_latticecomplexvectormatrix()
+    test_latticesubclass()

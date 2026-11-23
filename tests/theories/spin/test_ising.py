@@ -14,12 +14,14 @@ import contextlib
 import io
 import logging
 import os
+import shutil
 import tempfile
 
 import numpy as np
 import pytest
 from mpi4py import MPI
 
+from pylattice.core import stats
 from pylattice.core.grid import LatticeReal, LatticeVectorReal
 from pylattice.core.parallel import CartesianComm
 from pylattice.theories.spin.ising import IsingField, IsingModel, main
@@ -165,22 +167,22 @@ class Delta:
 
 
 def test_metropolis_acceptance_probability():
-    np.random.seed(11)
+    rng = np.random.default_rng(11)
     n = 200000
     _, _, _, model = make(np.ones([4, 4]))
     for beta, dE in ((0.5, 2.0), (0.25, 4.0), (1.0, 1.0), (0.3, 2.0), (0.7, 8.0)):
         model.beta = beta
-        acc = model.metropolis_test(Delta(np.full(n, dE)))
+        acc = model.metropolis_test(Delta(np.full(n, dE)), rng)
         p = np.exp(-beta * dE)
         assert acc.dtype == bool and acc.shape == (n,)
         assert abs(acc.mean() - p) < 5 * np.sqrt(p * (1 - p) / n), (beta, dE, acc.mean(), p)
     model.beta = 0.5
-    assert model.metropolis_test(Delta(np.full(1000, -8.0))).all()                         # lowering the energy
-    assert model.metropolis_test(Delta(np.zeros(1000))).all()                              # or keeping it
+    assert model.metropolis_test(Delta(np.full(1000, -8.0)), rng).all()                         # lowering the energy
+    assert model.metropolis_test(Delta(np.zeros(1000)), rng).all()                              # or keeping it
     model.beta = 0.0
-    assert model.metropolis_test(Delta(np.full(1000, 8.0))).all()                          # infinite temperature
+    assert model.metropolis_test(Delta(np.full(1000, 8.0)), rng).all()                          # infinite temperature
     model.beta = 5.0
-    assert not model.metropolis_test(Delta(np.full(100000, 8.0))).any()                    # exp(-40)
+    assert not model.metropolis_test(Delta(np.full(100000, 8.0)), rng).any()                    # exp(-40)
 
 
 # ----------------------------------------------------------------------------- one sweep
@@ -218,6 +220,59 @@ def test_global_update_odd_sites_see_the_updated_even_sites():
 
 
 # ----------------------------------------------------------------------------- sampling
+def run_with_seed(seed, global_seed=None, steps=20):
+    if global_seed is not None:
+        np.random.seed(global_seed)
+    cc, loc = setup([8, 8])
+    rng = cc.rng(seed)
+    field = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=rng)
+    model = IsingModel(field=field, logger=None, beta=0.4, rng=rng)
+    with quiet():
+        model.run_mc(steps=steps, online_obs=True, progress=False)
+    return cc, field.value.copy(), list(model.mlist), list(model.elist), list(model.acclist)
+
+
+def test_a_run_is_fixed_by_its_seed_and_not_by_the_global_numpy_state():
+    cc, v1, m1, e1, a1 = run_with_seed(5, global_seed=1)
+    _, v2, m2, e2, a2 = run_with_seed(5, global_seed=999)                                   # another global state: no difference
+    _, v3, m3, _, _ = run_with_seed(6)                                                      # another seed: another run
+    same = lambda a, b: all(cc.comm.allgather(np.array_equal(a, b)))
+    assert same(v1, v2) and m1 == m2 and e1 == e2 and a1 == a2
+    assert not same(v1, v3) and m1 != m3
+
+
+def test_the_ranks_start_and_run_with_different_random_numbers():
+    cc, loc = setup([8, 8])
+    fields = cc.comm.allgather(IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=cc.rng(7)).value)
+    for i in range(len(fields)):
+        for j in range(i + 1, len(fields)):
+            assert not np.array_equal(fields[i], fields[j])                                 # not the same block on every rank
+    # an integer seed is the same on every rank: that is what the generators are for
+    same = cc.comm.allgather(IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=7).value)
+    assert all(np.array_equal(same[0], f) for f in same)
+
+
+def test_the_random_start_takes_an_integer_or_a_generator():
+    cc, loc = setup([8, 8])
+    from_int = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=5)
+    from_gen = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=np.random.default_rng(5))
+    assert np.array_equal(from_int.value, from_gen.value) and set(np.unique(from_int.value)) <= {-1.0, 1.0}
+    rng, fresh = np.random.default_rng(5), np.random.default_rng(5)
+    IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=rng)
+    assert rng.random() != fresh.random()                                                   # the generator was used, and goes on
+
+
+def test_the_updates_draw_only_from_the_model_generator():
+    cc, loc = setup([4, 4])
+    rng = np.random.default_rng(3)
+    model = IsingModel(field=IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=1), logger=None, beta=0.4, rng=rng)
+    state = rng.bit_generator.state
+    other = np.random.default_rng(99)
+    model.global_update(other)                                                              # a generator given to the call is used...
+    assert rng.bit_generator.state == state                                                 # ...and the model's own is left alone
+    assert IsingModel(field=model.field, logger=None, beta=0.4).rng is not None             # default: the stream of this rank
+
+
 def exact_4x4(beta, L=4):
     st = ((np.arange(2 ** (L * L))[:, None] >> np.arange(L * L)) & 1) * 2 - 1
     s = st.reshape(-1, L, L)
@@ -232,14 +287,15 @@ def test_sampling_matches_the_exact_4x4_averages():
     # energy per site, |m| and m^2 from run_mc against the sum over all the 65536 states
     for beta in (0.3, 0.6):
         cc, loc = setup([4, 4])
-        field = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=cc.parallel_RNG(seed=11))
-        model = IsingModel(field=field, logger=None, beta=beta)
+        rng = cc.rng(11)
+        field = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=rng)
+        model = IsingModel(field=field, logger=None, beta=beta, rng=rng)
         with quiet():
             model.run_mc(steps=3300, online_obs=True, progress=False)
         e, m = np.array(model.elist[300:], float), np.array(model.mlist[300:], float)
-        obs = np.stack([e, np.abs(m), m ** 2], axis=1)
-        mean = obs.mean(0)
-        err = obs[:len(obs) // 20 * 20].reshape(20, -1, 3).mean(1).std(0, ddof=1) / np.sqrt(20)
+        mean, err = stats.mean_error(np.stack([e, np.abs(m), m ** 2], axis=1), blocks=20)
+        tau = stats.uwerr(e)[2]
+        assert tau < len(e) / 20 / 10                                                       # blocks much longer than the correlation
         for name, got, want, sigma in zip(('e', '|m|', 'm2'), mean, exact_4x4(beta), err):
             assert abs(got - want) < 4 * sigma + 2e-3, (beta, name, got, want, sigma)
 
@@ -248,7 +304,7 @@ def test_sampling_matches_the_exact_4x4_averages():
 def test_run_mc_bookkeeping():
     log = logging.getLogger('ising-test')
     cc, loc = setup([4, 4])
-    field = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=cc.parallel_RNG(seed=2))
+    field = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=cc.rng(2))
     model = IsingModel(field=field, logger=log, beta=0.4)
     assert model.log is log and model.beta == 0.4
     assert (model.mlist, model.elist, model.nlist, model.acclist) == ([], [], [], [])
@@ -268,6 +324,41 @@ def test_run_mc_bookkeeping():
     with quiet():
         other.run_mc(steps=0, online_obs=True)                                              # zero steps: just the initial values
     assert other.nlist == [0] and other.acclist == []
+
+
+def test_model_interface_for_the_monte_carlo_driver():
+    glob = random_config([4, 4], 9)
+    cc, loc, field, model = make(glob, beta=0.4)
+    assert model.comm is cc.comm
+    obs = model.observables()
+    assert set(obs) == {'m', 'e'} and all(type(v) is float for v in obs.values())
+    assert obs['m'] == float(model.magnetization()) and obs['e'] == float(model.energy())
+    assert abs(obs['m'] - glob.mean()) < 1e-6 and abs(obs['e'] - energy_per_site(glob)) < 1e-6
+    before = field.value.copy()
+    accepted, attempted = model.sweep()
+    assert attempted == field.value.size and accepted == int((field.value != before).sum())
+
+
+def test_run_mc_thermalization_and_thinning():
+    class Counting(IsingModel):
+        sweeps = 0
+        def global_update(self, rng=None):
+            self.sweeps += 1
+            return super().global_update(rng)
+    cc, loc = setup([4, 4])
+    model = Counting(field=IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=cc.rng(3)),
+                     logger=None, beta=0.4)
+    with quiet():
+        model.run_mc(steps=10, online_obs=True, progress=False, thermalization=5, measure_every=2)
+    assert model.sweeps == 15                                                               # thermalization + steps
+    assert model.nlist == [0, 2, 4, 6, 8, 10] and len(model.mlist) == len(model.elist) == 6
+    assert len(model.acclist) == 5 and all(0.0 <= a <= 1.0 for a in model.acclist)
+    h = model.history
+    assert h.sweeps == model.nlist and list(h['m']) == model.mlist and list(h['e']) == model.elist
+    assert h.acceptance == model.acclist
+    with quiet():
+        model.run_mc(steps=3, progress=False)                                               # not measured: lists unchanged
+    assert model.sweeps == 18 and model.nlist == [0, 2, 4, 6, 8, 10] and len(model.history) == 0
 
 
 def test_progress_bar_only_on_rank_zero():
@@ -297,6 +388,43 @@ def test_plot_mc_writes_the_figures():
             fresh.plot_mc()
         assert os.listdir('.') == []
         assert ('NO PLOTS' in out.getvalue()) == (cc.rank == 0)
+
+
+def parallel_hdf5():
+    try:
+        import h5py
+        return bool(h5py.get_config().mpi)
+    except ImportError:
+        return False
+
+
+def test_command_line_driver_with_checkpoints_and_run_log():
+    cc, loc = setup([4, 4])
+    argv = ['--grid=' + 'x'.join(map(str, loc)), '--mpigrid=' + 'x'.join(map(str, cc.mpigrid)), '--steps=7', '--beta=0.5']
+    path = cc.comm.bcast(tempfile.mkdtemp() if cc.rank == 0 else None, root=0)               # shared by the ranks
+    old = os.getcwd()
+    os.chdir(path)
+    try:
+        with quiet():
+            main(argv + ['--runlog-every=3'] + (['--checkpoint-every=3'] if parallel_hdf5() else []))
+        cc.comm.Barrier()
+        if cc.rank == 0:
+            lines = open('run.log').read().splitlines()
+            assert len(lines) == 2                                                             # sweeps 3 and 6 of 7
+            keys = [item.split('=')[0] for item in lines[0].split()]
+            assert keys == ['step', 'm', 'e', 'mem_MB', 'cpu_pct', 'steps_per_s']
+            if parallel_hdf5():
+                assert sorted(os.listdir('checkpoints')) == ['ising_00000003.hdf5', 'ising_00000006.hdf5', 'ising_00000007.hdf5']
+            else:
+                assert not os.path.exists('checkpoints')
+        cc.comm.Barrier()
+    finally:
+        os.chdir(old)
+        for handler in list(logging.getLogger('pylattice').handlers):
+            logging.getLogger('pylattice').removeHandler(handler)
+        cc.comm.Barrier()
+        if cc.rank == 0:
+            shutil.rmtree(path, ignore_errors=True)
 
 
 def test_command_line_driver():

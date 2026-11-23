@@ -18,6 +18,10 @@ def getSystemInfo():
     info['platform-version']=platform.version()       
     return info 
 
+_LATTICE_TYPES = (LatticeReal, LatticeComplex, LatticeRealMatrix, LatticeComplexMatrix,
+                  LatticeVectorReal, LatticeVectorComplex, LatticeVectorRealMatrix, LatticeVectorComplexMatrix)
+
+
 class Writer():
     def __init__(self,lattice,cartesiancomm): 
         self.lattice = lattice
@@ -25,7 +29,11 @@ class Writer():
 
     def write_header(self,file):
             file.attrs['grid'] = self.lattice.grid*self.cartesiancomm.mpigrid
-            file.attrs['type'] = type(self.lattice).__name__
+            # a subclass (an IsingField, an SU2Field) is stored as the lattice class it derives from
+            base = next((c for c in type(self.lattice).__mro__ if c in _LATTICE_TYPES), None)
+            if base is None:
+                raise TypeError("cannot write a {}: it is not a lattice".format(type(self.lattice).__name__))
+            file.attrs['type'] = base.__name__
             
             if isinstance(self.lattice,(LatticeRealMatrix,LatticeComplexMatrix,LatticeVectorRealMatrix,LatticeVectorComplexMatrix)):
                 file.attrs['N'] = self.lattice.N

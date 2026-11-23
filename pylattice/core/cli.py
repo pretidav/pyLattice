@@ -15,6 +15,16 @@ def _steps(text):
     return steps
 
 
+def _every(text):
+    try:
+        every = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError("'{}' is not an integer".format(text))
+    if every < 0:
+        raise argparse.ArgumentTypeError("a number of sweeps cannot be negative, got {}".format(every))
+    return every
+
+
 def _beta(text):
     try:
         beta = float(text)
@@ -47,6 +57,8 @@ class Parser():
         self.logfile = self.args['logfile']
         self.beta = self.args['beta']
         self.steps = self.args['steps']
+        self.checkpoint_every = self.args['checkpoint_every']
+        self.runlog_every = self.args['runlog_every']
 
     def parser(self, argv=None):
         parser = argparse.ArgumentParser(
@@ -61,6 +73,11 @@ class Parser():
         parser.add_argument('--steps', type=_steps, default=100, help='number of Monte Carlo steps')
         parser.add_argument('--beta', type=_beta, default=0.5, help='inverse temperature')
         parser.add_argument('--seed', type=_seed, default=0, help='seed of the random number generators')
+        parser.add_argument('--checkpoint-every', type=_every, default=0, metavar='N',
+                            help='save the configuration to ./checkpoints every N sweeps, and at the end (0: never)')
+        parser.add_argument('--runlog-every', type=_every, default=0, metavar='N',
+                            help='write a line to ./run.log every N sweeps: step, observables, memory, '
+                                 'cpu, sweeps per second (0: never)')
         parser.add_argument('--debug', action='store_true',
                             help='log at DEBUG level, from every rank')
         parser.add_argument('--logfile', action='store_true',

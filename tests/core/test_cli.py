@@ -26,8 +26,9 @@ def test_defaults():
     assert P.steps == 100 and P.beta == 0.5 and P.seed == 0
     assert P.debug is False and P.logfile is False
     assert type(P.steps) is int and type(P.beta) is float and type(P.seed) is int
+    assert P.checkpoint_every == 0 and P.runlog_every == 0                  # both off by default
     assert P.args == {'grid': [4, 4], 'mpigrid': [1, 2], 'steps': 100, 'beta': 0.5, 'seed': 0,
-                      'debug': False, 'logfile': False}
+                      'checkpoint_every': 0, 'runlog_every': 0, 'debug': False, 'logfile': False}
 
 
 def test_readme_command_line():
@@ -68,6 +69,8 @@ def test_parse_latt():
     (['--beta=hot'], '--beta'), (['--beta=nan'], '--beta'), (['--beta=inf'], '--beta'),
     (['--seed=-1'], '--seed'), (['--seed=4294967296'], '--seed'), (['--seed=x'], '--seed'),
     (['--steps'], '--steps'), (['--debug=yes'], '--debug'),
+    (['--checkpoint-every=-1'], '--checkpoint-every'), (['--checkpoint-every=x'], '--checkpoint-every'),
+    (['--runlog-every=-5'], '--runlog-every'), (['--runlog-every=2.5'], '--runlog-every'),
 ])
 def test_invalid_values_give_a_clean_error(argv, option, capsys):
     with pytest.raises(SystemExit) as exc:
@@ -75,6 +78,13 @@ def test_invalid_values_give_a_clean_error(argv, option, capsys):
     assert exc.value.code == 2                           # argparse usage error, not a traceback
     err = capsys.readouterr().err
     assert option in err and 'Traceback' not in err
+
+
+def test_checkpoint_and_runlog_options():
+    P = Parser(['--checkpoint-every=500', '--runlog-every', '10'])
+    assert (P.checkpoint_every, P.runlog_every) == (500, 10)
+    assert type(P.checkpoint_every) is int and P.args['checkpoint_every'] == 500
+    assert Parser(['--checkpoint-every=0']).checkpoint_every == 0
 
 
 def test_grid_and_mpigrid_must_have_the_same_dimensions(capsys):
@@ -99,7 +109,8 @@ def test_help_describes_every_option(capsys):
         Parser(['--help'])
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    for option in ('--grid', '--mpigrid', '--steps', '--beta', '--seed', '--debug', '--logfile'):
+    for option in ('--grid', '--mpigrid', '--steps', '--beta', '--seed', '--debug', '--logfile',
+                   '--checkpoint-every', '--runlog-every'):
         assert option in out
     assert 'XxYxZx' not in out                           # the old copy-pasted help texts are gone
     assert 'inverse temperature' in out and 'default: 4x4' in out and 'mpiexec' in out

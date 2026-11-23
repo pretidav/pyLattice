@@ -10,7 +10,8 @@ A lattice (gauge) theory simulation library in python.
 
 ~~~
 pylattice/
-  core/            tensors, lattice fields on an MPI grid, parallel HDF5 I/O, command line
+  core/            tensors, lattice fields on an MPI grid, parallel HDF5 I/O, command line,
+                   Monte Carlo driver (the theories provide the sweep)
     groups/        groups and algebras (SU(2) for now)
   theories/
     spin/          variables on sites: Ising
@@ -23,11 +24,32 @@ docs/              notes
 Run everything from the repository root, or install the package once with `pip install -e . --no-deps`
 (after the environment below), which makes `pylattice` importable from any directory.
 
+The error analysis (`pylattice.core.stats`) includes the code of
+[py-uwerr](https://github.com/pretidav/py-uwerr) (Wolff's Gamma method, MIT license, see the header of the file).
+If you publish results obtained with it, cite U. Wolff, *Monte Carlo errors with less errors*,
+Comput. Phys. Commun. **156**, 143 (2004), [hep-lat/0306017](https://arxiv.org/abs/hep-lat/0306017).
+
 # Ising Model 
 
 ~~~
 mpiexec -np 4 python -m pylattice.theories.spin.ising --grid=20x20 --mpigrid=2x2 --beta=1.5 --steps=2000
 ~~~
+
+Two options, both off by default, record the run (they need `--steps` sweeps to be longer than the interval):
+
+~~~
+mpiexec -np 4 python -m pylattice.theories.spin.ising --grid=20x20 --mpigrid=2x2 --beta=1.5 --steps=2000 \
+    --checkpoint-every=500 --runlog-every=100
+~~~
+
+- `--checkpoint-every N` saves the configuration (parallel HDF5, read it with `pylattice.core.hdf5io.Reader`)
+  to `checkpoints/ising_<sweep>.hdf5` every N sweeps and at the end.
+- `--seed S` fixes the run: every rank draws from its own independent stream of `S`
+  (`pylattice.core.rng`, numpy `SeedSequence`), so a run is reproducible for a given seed and rank layout.
+- `--runlog-every N` appends a line to `run.log` every N sweeps:
+  `step=100 m=0.12 e=-1.91 mem_MB=312.4 cpu_pct=98.7 steps_per_s=211.30`
+  (sweeps since the start, the observables, resident memory of all the ranks, mean cpu use per rank,
+  sweeps per second).
 
 ## Performance Test 
 
@@ -76,6 +98,11 @@ pytest tests/core/test_tensors.py
 python tests/core/test_grid.py
 mpiexec -n 2 python tests/core/test_grid_mpi.py
 mpiexec -n 4 python tests/core/test_hdf5io.py
+pytest tests/core/test_rng.py tests/core/test_stats.py
+mpiexec -n 2 python tests/core/test_rng.py              # one independent random stream per rank
+pytest tests/core/test_montecarlo.py tests/core/test_callbacks.py
+mpiexec -n 2 python tests/core/test_callbacks.py        # checkpoints and run log (the checkpoint tests need parallel h5py)
+mpiexec -n 2 python tests/core/test_montecarlo.py   # the driver, also on a split job
 pytest tests/theories/spin/test_ising.py
 mpiexec -n 2 python tests/theories/spin/test_ising.py      # same checks on a lattice split over 2 (or 1, 4) ranks
 ~~~

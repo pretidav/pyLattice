@@ -1,6 +1,7 @@
 from mpi4py import MPI
 import numpy as np
 import matplotlib.pyplot as plt
+from pylattice.core.rng import rank_rng
 import logging
 import warnings
 from contextlib import contextmanager, nullcontext
@@ -57,16 +58,15 @@ class CartesianComm():
         self.mpitypes = {'float32': MPI.FLOAT, 'complex64': MPI.COMPLEX}
         self.cartesian.barrier()
 
+    def rng(self, seed=0):
+        """the numpy Generator of this rank: an independent stream for every rank (see pylattice.core.rng)"""
+        return rank_rng(seed, self.comm)
+
     def parallel_RNG(self,seed=0): 
-        if self.rank == 0: 
-            np.random.seed(seed=seed)
-            snd_seed = np.random.randint(low=0,high=9999,dtype='i',size=np.prod(self.mpigrid))
-        else : 
-            snd_seed = None
-        recv_seed = np.array(1,dtype='i')
-        self.cartesian.Scatter(snd_seed,recv_seed,root=0)
-        self.cartesian.barrier()
-        return recv_seed 
+        """An integer seed for this rank, for code that wants a number: rng() gives the stream itself.
+        It is drawn from the independent streams of rank_rng, so ranks do not share seeds; nothing is
+        communicated."""
+        return int(np.random.SeedSequence(seed, spawn_key=(self.rank,)).generate_state(1)[0])
 
     def find_nn_mpi(self, mu, displacement=1):
         left, right = tuple(MPI.Cartcomm.Shift(

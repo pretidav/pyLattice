@@ -13,3 +13,9 @@ pylattice/theories/__pycache__/__init__.cpython-311.pyc
 pylattice/theories/spin/__pycache__/__init__.cpython-311.pyc
 pylattice/theories/spin/__pycache__/ising.cpython-311.pyc
 *.png
+pylattice/core/__pycache__/stats.cpython-311.pyc
+pylattice/core/__pycache__/callbacks.cpython-311.pyc
+pylattice/core/__pycache__/hdf5io.cpython-311.pyc
+pylattice/core/__pycache__/montecarlo.cpython-311.pyc
+pylattice/core/__pycache__/rng.cpython-311.pyc
+*.log
