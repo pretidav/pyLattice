@@ -22,6 +22,8 @@ jobs:
           pip install -r requirements.txt
       - name: Run test Linalg
         run:  pytest tests/test_linalg.py
+      - name: Run test input arguments and logs
+        run:  pytest tests/test_inputargs.py
       - name: Run test Lattice
         run:  python tests/test_lattice.py
       - name: Run test LatticeEO

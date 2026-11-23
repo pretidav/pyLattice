@@ -43,7 +43,7 @@ Tested on macOS with an Apple Silicon (arm64) Mac. Everything comes from conda-f
 
 ~~~
 conda create -n pylattice -c conda-forge --override-channels \
-  python=3.11 numpy scipy matplotlib psutil pytest openmpi mpi4py "h5py=*=mpi_openmpi*"
+  python=3.11 numpy scipy matplotlib psutil pytest rich openmpi mpi4py "h5py=*=mpi_openmpi*"
 conda activate pylattice
 ~~~
 

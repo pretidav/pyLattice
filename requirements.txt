@@ -3,3 +3,4 @@ matplotlib
 mpi4py
 pytest
 psutil
+rich
