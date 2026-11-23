@@ -1,6 +1,6 @@
-from lattice.grid import LatticeReal, LatticeComplex, LatticeRealMatrix, LatticeComplexMatrix, LatticeVectorReal, LatticeVectorComplex, LatticeVectorRealMatrix, LatticeVectorComplexMatrix
-from linalg.tensors import RealMatrix, ComplexMatrix, VectorReal, VectorComplex, VectorRealMatrix, VectorComplexMatrix
-from mpi.parallel import CartesianComm
+from pylattice.core.grid import LatticeReal, LatticeComplex, LatticeRealMatrix, LatticeComplexMatrix, LatticeVectorReal, LatticeVectorComplex, LatticeVectorRealMatrix, LatticeVectorComplexMatrix
+from pylattice.core.tensors import RealMatrix, ComplexMatrix, VectorReal, VectorComplex, VectorRealMatrix, VectorComplexMatrix
+from pylattice.core.parallel import CartesianComm
 import numpy as np
 
 mpigrid = [1, 1]

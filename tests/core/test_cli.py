@@ -1,6 +1,6 @@
-"""Tests of utils.inputargs: the command line Parser and the rich Logger.
+"""Tests of pylattice.core.cli: the command line Parser and the rich Logger.
 
-Run with:  pytest tests/test_inputargs.py
+Run with:  pytest tests/core/test_cli.py
 """
 import io
 import logging
@@ -12,9 +12,9 @@ import sys
 import pytest
 from rich.console import Console
 
-from utils.inputargs import Parser, Logger
+from pylattice.core.cli import Parser, Logger
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 # =========================================================================
@@ -112,10 +112,10 @@ def test_parser_reads_sys_argv_by_default(monkeypatch):
 
 
 def test_ising_model_command_line_is_wired():
-    r = subprocess.run([sys.executable, 'ising_model.py', '--help'], cwd=ROOT, capture_output=True,
+    r = subprocess.run([sys.executable, '-m', 'pylattice.theories.spin.ising', '--help'], cwd=ROOT, capture_output=True,
                        text=True, env=dict(os.environ, PYTHONPATH=ROOT), timeout=120)
     assert r.returncode == 0 and '--beta' in r.stdout and 'inverse temperature' in r.stdout
-    r = subprocess.run([sys.executable, 'ising_model.py', '--grid=4x4', '--mpigrid=2x2x2'], cwd=ROOT,
+    r = subprocess.run([sys.executable, '-m', 'pylattice.theories.spin.ising', '--grid=4x4', '--mpigrid=2x2x2'], cwd=ROOT,
                        capture_output=True, text=True, env=dict(os.environ, PYTHONPATH=ROOT), timeout=120)
     assert r.returncode == 2 and '--grid has 2 dimensions but --mpigrid has 3' in r.stderr
 

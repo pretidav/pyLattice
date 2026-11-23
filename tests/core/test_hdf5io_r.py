@@ -1,20 +1,20 @@
-"""Read half of a cross-layout test of IO.MPI_IO: see test_mpi_io_w.py, which must have been run
+"""Read half of a cross-layout test of pylattice.core.hdf5io: see test_hdf5io_w.py, which must have been run
 first, in the same directory and (usually) with a different number of ranks.
 
-    mpiexec -n 4 python test_mpi_io_w.py
-    mpiexec -n 2 python test_mpi_io_r.py            # reads with rank grid 1x1x2
+    mpiexec -n 4 python test_hdf5io_w.py
+    mpiexec -n 2 python test_hdf5io_r.py            # reads with rank grid 1x1x2
 
-Another layout can be given as an argument, e.g. `mpiexec -n 8 python test_mpi_io_r.py 2x2x2`.
+Another layout can be given as an argument, e.g. `mpiexec -n 8 python test_hdf5io_r.py 2x2x2`.
 """
 import sys
 
 import numpy as np
 
-from IO.MPI_IO import Reader
-from mpi.parallel import CartesianComm
-from lattice.grid import LatticeComplex, LatticeReal, LatticeComplexMatrix, LatticeRealMatrix, LatticeVectorReal, LatticeVectorComplex, LatticeVectorRealMatrix, LatticeVectorComplexMatrix
+from pylattice.core.hdf5io import Reader
+from pylattice.core.parallel import CartesianComm
+from pylattice.core.grid import LatticeComplex, LatticeReal, LatticeComplexMatrix, LatticeRealMatrix, LatticeVectorReal, LatticeVectorComplex, LatticeVectorRealMatrix, LatticeVectorComplexMatrix
 
-# the same definitions as in test_mpi_io_w.py
+# the same definitions as in test_hdf5io_w.py
 GLOBAL = [4, 4, 4]
 TYPES = [('LatticeReal', LatticeReal, {}, (), 'float32'),
          ('LatticeComplex', LatticeComplex, {}, (), 'complex64'),
@@ -58,6 +58,10 @@ def test_read():
     Lattice = Reader(cartesiancomm=CC).read(filename=PREFIX + 'ext.hdf5')
     if not np.array_equal(Lattice.value, global_field((), 'float32')[block].reshape(-1)):
         problems.append('LatticeReal: values read from a name ending in .hdf5 differ')
+    # the file with the full class path in its header, as older versions wrote it
+    Lattice = Reader(cartesiancomm=CC).read(filename=PREFIX + 'legacy')
+    if type(Lattice) is not LatticeReal or not np.array_equal(Lattice.value, global_field((), 'float32')[block].reshape(-1)):
+        problems.append('LatticeReal: a file with the old-style type attribute is not read back')
     allproblems = CC.comm.allgather(problems)                   # every rank fails together
     allproblems = [p for rank, ps in enumerate(allproblems) for p in ['rank {}: {}'.format(rank, q) for q in ps]]
     assert not allproblems, allproblems

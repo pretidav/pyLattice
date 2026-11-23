@@ -1,7 +1,8 @@
-from lattice.grid import LatticeReal,LatticeVectorReal
+from pylattice.core.grid import LatticeReal,LatticeVectorReal
 import numpy as np 
 from copy import copy
-from mpi.parallel import pprint, pplot
+from pylattice.core.parallel import CartesianComm, pprint, pplot
+from pylattice.core.cli import Parser, Logger
 
 class IsingField(LatticeReal):
     def __init__(self,grid,cartesiancomm, initialization='cold', seed = 0): 
@@ -113,3 +114,23 @@ class IsingModel():
             pplot(comm=self.field.cartesiancomm.comm, x=self.nlist[1:], y=self.acclist, title='Acceptance size={} beta={}'.format(self.field.grid*self.field.cartesiancomm.mpigrid,self.beta), file='./acc.png')
         else:
             pprint(comm=self.field.cartesiancomm.comm, msg='[x] NO PLOTS. "online_obs" must be set to True')
+
+
+def main(argv=None):
+    """Command line driver, e.g.
+    mpiexec -np 4 python -m pylattice.theories.spin.ising --grid=20x20 --mpigrid=2x2 --beta=1.5 --steps=2000
+    """
+    PP = Parser(argv)
+    CC = CartesianComm(mpigrid=PP.mpigrid)
+    LL = Logger(debug=PP.debug, logfile=PP.logfile)
+    local_seed = CC.parallel_RNG(seed=PP.seed)
+
+    field = IsingField(grid=PP.grid, cartesiancomm=CC, initialization='random', seed=local_seed)
+    model = IsingModel(field=field, logger=LL.log, beta=PP.beta)
+
+    model.run_mc(steps=PP.steps, online_obs=True)
+    model.plot_mc()
+
+
+if __name__ == '__main__':
+    main()

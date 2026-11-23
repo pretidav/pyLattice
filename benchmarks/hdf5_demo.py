@@ -3,11 +3,11 @@ Creates an HDF5 file with a single dataset of shape (channels, n),
 filled with random numbers.
 Writing to the different channels (rows) is parallelized using MPI.
 Usage:
-  mpirun -np 8 python demo.py
+  mpirun -np 8 python hdf5_demo.py
 Small shell script to run timings with different numbers of MPI processes:
   for np in 1 2 4 8 12 16 20 24 28 32; do
       echo -n "$np ";
-      /usr/bin/time --format="%e" mpirun -np $np python demo.py;
+      /usr/bin/time --format="%e" mpirun -np $np python hdf5_demo.py;
   done
 """
 

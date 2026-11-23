@@ -3,8 +3,8 @@ import h5py
 import numpy as np
 from datetime import datetime
 import platform,socket,psutil
-from lattice.grid import LatticeReal, LatticeComplex, LatticeRealMatrix, LatticeComplexMatrix, LatticeVectorReal, LatticeVectorComplex, LatticeVectorRealMatrix, LatticeVectorComplexMatrix
-from mpi.parallel import pprint
+from pylattice.core.grid import LatticeReal, LatticeComplex, LatticeRealMatrix, LatticeComplexMatrix, LatticeVectorReal, LatticeVectorComplex, LatticeVectorRealMatrix, LatticeVectorComplexMatrix
+from pylattice.core.parallel import pprint
 from mpi4py import MPI
 
 def getSystemInfo():
@@ -25,7 +25,7 @@ class Writer():
 
     def write_header(self,file):
             file.attrs['grid'] = self.lattice.grid*self.cartesiancomm.mpigrid
-            file.attrs['type'] = str(type(self.lattice))
+            file.attrs['type'] = type(self.lattice).__name__
             
             if isinstance(self.lattice,(LatticeRealMatrix,LatticeComplexMatrix,LatticeVectorRealMatrix,LatticeVectorComplexMatrix)):
                 file.attrs['N'] = self.lattice.N
@@ -98,30 +98,31 @@ class Reader():
         file = h5py.File(filename, 'r', driver='mpio', comm=self.cartesiancomm.comm)
 
         self.grid = [int(a/b) for a,b in zip(file.attrs['grid'],self.cartesiancomm.mpigrid)]
-        self.latticetype = file.attrs['type'] 
+        # the class name; files written by older versions hold the full path, "<class 'lattice.grid.LatticeReal'>"
+        self.latticetype = str(file.attrs['type']).rstrip("'>").split('.')[-1]
 
-        if self.latticetype == "<class 'lattice.grid.LatticeReal'>": 
+        if self.latticetype == 'LatticeReal': 
             self.lattice = LatticeReal(grid=self.grid,cartesiancomm=self.cartesiancomm)
             
-        elif self.latticetype == "<class 'lattice.grid.LatticeComplex'>": 
+        elif self.latticetype == 'LatticeComplex': 
             self.lattice = LatticeComplex(grid=self.grid,cartesiancomm=self.cartesiancomm)
 
-        elif self.latticetype == "<class 'lattice.grid.LatticeRealMatrix'>": 
+        elif self.latticetype == 'LatticeRealMatrix': 
             self.lattice = LatticeRealMatrix(grid=self.grid,cartesiancomm=self.cartesiancomm, N=int(file.attrs['N']))
 
-        elif self.latticetype == "<class 'lattice.grid.LatticeComplexMatrix'>":     
+        elif self.latticetype == 'LatticeComplexMatrix':     
             self.lattice = LatticeComplexMatrix(grid=self.grid,cartesiancomm=self.cartesiancomm, N=int(file.attrs['N']))
 
-        elif self.latticetype == "<class 'lattice.grid.LatticeVectorReal'>":     
+        elif self.latticetype == 'LatticeVectorReal':     
             self.lattice = LatticeVectorReal(grid=self.grid,cartesiancomm=self.cartesiancomm, Nd=int(file.attrs['Nd']))
 
-        elif self.latticetype == "<class 'lattice.grid.LatticeVectorComplex'>":     
+        elif self.latticetype == 'LatticeVectorComplex':     
             self.lattice = LatticeVectorComplex(grid=self.grid,cartesiancomm=self.cartesiancomm, Nd=int(file.attrs['Nd']))
         
-        elif self.latticetype == "<class 'lattice.grid.LatticeVectorRealMatrix'>":     
+        elif self.latticetype == 'LatticeVectorRealMatrix':     
             self.lattice = LatticeVectorRealMatrix(grid=self.grid,cartesiancomm=self.cartesiancomm, N=int(file.attrs['N']),  Nd=int(file.attrs['Nd']))
 
-        elif self.latticetype == "<class 'lattice.grid.LatticeVectorComplexMatrix'>":     
+        elif self.latticetype == 'LatticeVectorComplexMatrix':     
             self.lattice = LatticeVectorComplexMatrix(grid=self.grid,cartesiancomm=self.cartesiancomm, N=int(file.attrs['N']),  Nd=int(file.attrs['Nd']))
 
         for idx in np.ndindex(tuple(self.lattice.grid)):

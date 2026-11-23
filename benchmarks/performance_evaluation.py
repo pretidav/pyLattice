@@ -2,8 +2,8 @@
 Strong-scaling benchmark: (A*B).reducesum() on a LatticeRealMatrix (N=2).
 The global grid is fixed (default 40x40x40x40) and split over the MPI grid.
 
-  mpiexec -np 4 python performance_evaluation.py --mpigrid=2x2x1x1
-  python performance_evaluation.py --naive        # no MPI, plain loop
+  mpiexec -np 4 python benchmarks/performance_evaluation.py --mpigrid=2x2x1x1
+  python benchmarks/performance_evaluation.py --naive        # no MPI, plain loop
 
 Prints one JSON line (rank 0) with the best and all timings in seconds.
 """
@@ -13,8 +13,8 @@ import time
 
 import numpy as np
 
-from lattice.grid import LatticeRealMatrix
-from mpi.parallel import CartesianComm
+from pylattice.core.grid import LatticeRealMatrix
+from pylattice.core.parallel import CartesianComm
 
 
 def parse():

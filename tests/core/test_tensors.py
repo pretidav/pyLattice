@@ -3,14 +3,14 @@
 Part 1 checks hand-computed values. Part 2 checks every operation and every pair of
 classes against NumPy references, including the type and dtype of each result.
 
-Run with:  pytest tests/test_linalg.py
+Run with:  pytest tests/core/test_tensors.py
 """
 import itertools
 
 import numpy as np
 import pytest
 
-from linalg.tensors import (Real, Complex, VectorReal, VectorComplex, RealMatrix, ComplexMatrix,
+from pylattice.core.tensors import (Real, Complex, VectorReal, VectorComplex, RealMatrix, ComplexMatrix,
                             VectorRealMatrix, VectorComplexMatrix, Identity, Kroneker)
 
 N, ND = 3, 4

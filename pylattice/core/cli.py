@@ -51,7 +51,7 @@ class Parser():
     def parser(self, argv=None):
         parser = argparse.ArgumentParser(
             description='Monte Carlo simulation on a lattice split over MPI ranks.',
-            epilog='example: mpiexec -np 4 python ising_model.py --grid=20x20 --mpigrid=2x2 --beta=1.5 --steps=2000',
+            epilog='example: mpiexec -np 4 python -m pylattice.theories.spin.ising --grid=20x20 --mpigrid=2x2 --beta=1.5 --steps=2000',
             formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         parser.add_argument('--grid', type=self._lattice_arg, default='4x4',
                             help='lattice size of each MPI rank, AxBx... (the global lattice is grid*mpigrid)')

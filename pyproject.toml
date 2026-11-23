@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pylattice"
+version = "0.1.0"
+description = "A lattice (gauge) theory simulation library in python, parallel with MPI"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["numpy", "scipy", "matplotlib", "mpi4py", "psutil", "rich"]
+
+[project.optional-dependencies]
+# needed by pylattice.core.hdf5io; it must be built with parallel HDF5 (see the README)
+hdf5 = ["h5py"]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["pylattice*"]

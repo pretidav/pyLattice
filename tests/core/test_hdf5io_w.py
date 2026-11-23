@@ -1,13 +1,13 @@
-"""Write half of a cross-layout test of IO.MPI_IO (the read half is test_mpi_io_r.py).
+"""Write half of a cross-layout test of pylattice.core.hdf5io (the read half is test_hdf5io_r.py).
 
 A known global 4x4x4 field is written for every lattice type, split over one MPI layout; the
 reader then reads it back with a *different* layout and checks it against the same field.
 Both scripts must run in the same directory:
 
-    mpiexec -n 4 python test_mpi_io_w.py            # writes with rank grid 1x2x2
-    mpiexec -n 2 python test_mpi_io_r.py            # reads with rank grid 1x1x2
+    mpiexec -n 4 python test_hdf5io_w.py            # writes with rank grid 1x2x2
+    mpiexec -n 2 python test_hdf5io_r.py            # reads with rank grid 1x1x2
 
-Another layout can be given as an argument, e.g. `mpiexec -n 8 python test_mpi_io_w.py 2x2x2`.
+Another layout can be given as an argument, e.g. `mpiexec -n 8 python test_hdf5io_w.py 2x2x2`.
 """
 import os
 import sys
@@ -15,9 +15,9 @@ import sys
 import h5py
 import numpy as np
 
-from IO.MPI_IO import Writer
-from mpi.parallel import CartesianComm
-from lattice.grid import LatticeComplex, LatticeReal, LatticeComplexMatrix, LatticeRealMatrix, LatticeVectorReal, LatticeVectorComplex, LatticeVectorRealMatrix, LatticeVectorComplexMatrix
+from pylattice.core.hdf5io import Writer
+from pylattice.core.parallel import CartesianComm
+from pylattice.core.grid import LatticeComplex, LatticeReal, LatticeComplexMatrix, LatticeRealMatrix, LatticeVectorReal, LatticeVectorComplex, LatticeVectorRealMatrix, LatticeVectorComplexMatrix
 
 GLOBAL = [4, 4, 4]
 # name, class, constructor arguments, shape of the value at one site, dtype
@@ -57,6 +57,12 @@ def test_write():
     Lattice = LatticeReal(grid=grid, cartesiancomm=CC)
     Lattice.fill_value(n=global_field((), 'float32')[local_block()].reshape(-1).copy())
     Writer(lattice=Lattice, cartesiancomm=CC).write(filename=PREFIX + 'ext.hdf5')
+    # a file as written by older versions, which stored the full class path in the header
+    Writer(lattice=Lattice, cartesiancomm=CC).write(filename=PREFIX + 'legacy')
+    CC.comm.Barrier()
+    if CC.rank == 0:
+        with h5py.File(PREFIX + 'legacy.hdf5', 'r+') as f:
+            f.attrs['type'] = "<class 'lattice.grid.LatticeReal'>"
     CC.comm.Barrier()
 
     problems = []
@@ -65,7 +71,7 @@ def test_write():
             with h5py.File(PREFIX + name + '.hdf5', 'r') as f:
                 if list(f.attrs['grid']) != GLOBAL:
                     problems.append('{}: grid attribute {}'.format(name, list(f.attrs['grid'])))
-                if f.attrs['type'] != "<class 'lattice.grid.{}'>".format(name):
+                if f.attrs['type'] != name:
                     problems.append('{}: type attribute {}'.format(name, f.attrs['type']))
                 for key, val in kw.items():
                     if int(f.attrs[key]) != val:

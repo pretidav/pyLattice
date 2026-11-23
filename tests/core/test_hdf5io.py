@@ -1,6 +1,6 @@
-from IO.MPI_IO import Writer, Reader
-from mpi.parallel import CartesianComm
-from lattice.grid import LatticeComplex, LatticeReal, LatticeComplexMatrix, LatticeRealMatrix, LatticeVectorReal, LatticeVectorComplex, LatticeVectorRealMatrix, LatticeVectorComplexMatrix
+from pylattice.core.hdf5io import Writer, Reader
+from pylattice.core.parallel import CartesianComm
+from pylattice.core.grid import LatticeComplex, LatticeReal, LatticeComplexMatrix, LatticeRealMatrix, LatticeVectorReal, LatticeVectorComplex, LatticeVectorRealMatrix, LatticeVectorComplexMatrix
 import numpy as np
 
 tol = 10e-6

@@ -1,4 +1,4 @@
-from lattice.grid import *
+from pylattice.core.grid import *
 
 
 #def test_realfield():

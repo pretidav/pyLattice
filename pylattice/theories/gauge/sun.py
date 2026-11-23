@@ -1,47 +1,16 @@
-from linalg.tensors import ComplexMatrix
-from lattice.grid import LatticeVectorComplexMatrix, LatticeVectorReal, LatticeComplexMatrix, ComplexMatrix, VectorReal, VectorComplex
+"""SU(2) gauge field: one SU(2) matrix on each link of the lattice, with its updates.
+The group and algebra operations it uses are in pylattice.core.groups.sun.
 
-import numpy as np 
-from scipy.linalg import expm
+Staple, Plaq and Action are not implemented yet.
+"""
+import numpy as np
 
-def get_generator(k):
-        if k==0: 
-            out = ComplexMatrix(value = np.array([[0,1],[1,0]],dtype='complex64')/2 )
-        if k==1: 
-            out = ComplexMatrix(value =  np.array([[0,-1j],[1j,0]],dtype='complex64')/2 )
-        if k==2: 
-            out = ComplexMatrix(value =  np.array([[1,0],[0,-1]],dtype='complex64')/2 )
-        return out 
+from pylattice.core.grid import LatticeVectorComplexMatrix
+from pylattice.core.tensors import ComplexMatrix
+from pylattice.core.groups.sun import (get_generator, random_lie_algebra_vector, unitarize,
+                                       ProjToAlgebra, ExpProjToGroup)
 
-def structure_constants(i,j,k): 
-    if (i,j,k) in [(1,0,2),(2,1,0),(0,2,1)]: 
-        return -1 
-    else: 
-        if i!=j and j!=k and i!=k: 
-            return 1 
-        else : 
-            return 0 
 
-def random_lie_algebra_vector(): 
-    adj_dim = 3
-    return VectorReal(value=np.array(np.random.random(size=adj_dim),dtype=float)-0.5)
-
-def unitarize(input): 
-    out = ComplexMatrix(N=2)
-    u, _ = np.linalg.qr(input.value,mode='complete')
-    out.value = u
-    return  out
-
-def ProjToAlgebra(input):
-    adj_dim = 3    
-    return VectorComplex(value = np.array([ (-2.0j*get_generator(a)*input).trace().value[0] for a in range(adj_dim)]))
-
-def ExpProjToGroup(input):
-    T = np.array([get_generator(a).value for a in range(input.Nd)])
-    w = np.expand_dims(input.value,axis=[1,2])
-    M = np.sum(T*w*1j,axis=0)
-    return ComplexMatrix(value=expm(M))     
-   
 class SU2Field(LatticeVectorComplexMatrix): 
     def __init__(self,grid,cartesiancomm,Nd): 
         super().__init__(grid=grid,cartesiancomm=cartesiancomm, Nd=Nd, N=2)

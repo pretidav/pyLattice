@@ -1,5 +1,5 @@
-from mpi.parallel import *
-from linalg.tensors import *
+from pylattice.core.parallel import *
+from pylattice.core.tensors import *
 import numpy as np
 
 
