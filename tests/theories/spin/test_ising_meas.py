@@ -6,9 +6,7 @@ Run on one process or on several ranks:
     mpiexec -n 4 python tests/theories/spin/test_ising_meas.py        # 1, 2 or 4 ranks
 """
 import contextlib
-import importlib.util
 import json
-import sys
 import os
 import shutil
 import tempfile
@@ -17,26 +15,27 @@ import numpy as np
 import pytest
 from mpi4py import MPI
 
-if importlib.util.find_spec('h5py') is None:               # these tests read and write checkpoints
-    if __name__ == '__main__':
-        print('[-] skipped: h5py is not installed')
-        sys.exit(0)
-    pytest.skip('h5py is not installed', allow_module_level=True)
-
-from pylattice.core.callbacks import Checkpointer, MeasurementFile
 from pylattice.core.grid import LatticeReal
-from pylattice.core.hdf5io import Writer
-from pylattice.core.measure import measure_files
 from pylattice.core.parallel import CartesianComm
-from pylattice.theories.spin import ising_meas
 from pylattice.theories.spin.ising import IsingField, IsingModel
+
+try:                                                       # these need h5py: without it the tests are collected and skipped
+    from pylattice.core.callbacks import Checkpointer, MeasurementFile
+    from pylattice.core.hdf5io import Writer
+    from pylattice.core.measure import measure_files
+    from pylattice.theories.spin import ising_meas
+except ImportError:
+    ising_meas = None
 
 COMM = MPI.COMM_WORLD
 RANK, SIZE = COMM.Get_rank(), COMM.Get_size()
 MPIGRID = {1: [1, 1], 2: [2, 1], 4: [2, 2]}[SIZE]
 def parallel_hdf5():
-    import h5py
-    return bool(h5py.get_config().mpi)
+    try:
+        import h5py
+        return ising_meas is not None and bool(h5py.get_config().mpi)
+    except ImportError:
+        return False
 
 
 def HDF5(f):
