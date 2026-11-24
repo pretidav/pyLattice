@@ -7,6 +7,7 @@ runs it for you: call it when you want to check that an installation (or a chang
     python run_tests.py --quick      # only the single-process tests (pytest), about 15 s
     python run_tests.py --full       # also every MPI test on 1 and 4 ranks, and the cross-layout HDF5 test
     python run_tests.py -k ising     # only the steps whose name contains "ising"
+    python run_tests.py --chunk gauge   # only the tests of one chunk: core, gauge or spin (what each CI workflow runs)
     python run_tests.py -v           # show the output of every step, not only of the failed ones
     python run_tests.py --list       # list the steps and exit
 
@@ -45,6 +46,7 @@ PYTEST_FILES = [
     'tests/core/test_rng.py', 'tests/core/test_stats.py', 'tests/core/test_montecarlo.py', 'tests/core/test_driver.py',
     'tests/core/test_callbacks.py', 'tests/theories/spin/test_ising.py',
     'tests/theories/spin/test_ising_meas.py', 'tests/utils/test_plot_meas.py', 'tests/utils/test_run_tests.py',
+    'tests/utils/test_ci_paths.py',
 ]
 # plain scripts: they run their tests when executed
 SCRIPT_FILES = ['tests/core/test_grid.py', 'tests/core/test_grid_eo.py']
@@ -69,29 +71,58 @@ def all_files_of_the_routine():
     return set(PYTEST_FILES) | set(SCRIPT_FILES) | set(MPI_FILES) | {HDF5_FILE} | set(HDF5_CROSS)
 
 
+CHUNKS = ('core', 'gauge', 'spin')
+# the tests that every chunk runs: they check the repository itself (a test file nobody registered, the paths of the CI)
+EVERY_CHUNK = ('tests/utils/test_run_tests.py', 'tests/utils/test_ci_paths.py')
+_GROUP_TESTS = ('test_discrete.py', 'test_su2.py', 'test_su.py', 'test_group_interface.py')
+
+
+def chunk_of(path):
+    """The chunk of the CI that a test file belongs to, None for the tests every chunk runs (EVERY_CHUNK):
+        gauge   the groups (Z2, SU(2), SU(N)) and the gauge theories
+        spin    the Ising model and the printing and plotting of measurements
+        core    the rest: tensors, lattices, MPI, command line, random streams, statistics, Monte Carlo driver, HDF5
+    Each CI workflow (.github/workflows/tests-<chunk>.yml) runs one chunk, and only when a file that the chunk covers changes."""
+    if path in EVERY_CHUNK:
+        return None
+    if path.startswith('tests/theories/gauge/') or Path(path).name in _GROUP_TESTS:
+        return 'gauge'
+    if path.startswith('tests/theories/spin/') or path == 'tests/utils/test_plot_meas.py':
+        return 'spin'
+    return 'core'
+
+
+def files_of_chunk(chunk):
+    """the test files that run in a chunk (the ones of every chunk included)"""
+    return sorted(f for f in all_files_of_the_routine() | set(EVERY_CHUNK) if chunk_of(f) in (chunk, None))
+
+
 class Step:
     def __init__(self, name, commands, needs_mpi=False, needs_parallel_h5=False):
         self.name, self.commands = name, commands              # commands: argument lists, run in order
         self.needs_mpi, self.needs_parallel_h5 = needs_mpi, needs_parallel_h5
 
 
-def build_steps(mpiexec, quick=False, full=False, oversubscribe=False):
+def build_steps(mpiexec, quick=False, full=False, oversubscribe=False, chunk=None):
+    inside = lambda f: chunk is None or chunk_of(f) in (chunk, None)          # chunk: only the tests of that chunk
+
     def mpi(n, *args):
         return [mpiexec] + (['--oversubscribe'] if oversubscribe else []) + ['-n', str(n), PY] + list(args)
 
     pytest = ['-m', 'pytest', '-q', '--color=no', '-p', 'no:cacheprovider', '--rootdir', str(ROOT), '-c', str(ROOT / 'pyproject.toml')]
-    steps = [Step('pytest (single process)', [[PY] + pytest + [str(ROOT / f) for f in PYTEST_FILES]])]
+    steps = [Step('pytest (single process)', [[PY] + pytest + [str(ROOT / f) for f in PYTEST_FILES if inside(f)]])]
     if quick:
         return steps
-    for f in SCRIPT_FILES:
+    for f in filter(inside, SCRIPT_FILES):
         steps.append(Step(Path(f).name, [[PY, str(ROOT / f)]]))
-    for f, (standard, extra) in MPI_FILES.items():
+    for f, (standard, extra) in filter(lambda item: inside(item[0]), MPI_FILES.items()):
         for n in (standard + extra if full else standard):
             steps.append(Step('{} on {} rank{}'.format(Path(f).name, n, '' if n == 1 else 's'),
                               [mpi(n, str(ROOT / f))], needs_mpi=True))
-    steps.append(Step('test_hdf5io.py on 4 ranks', [mpi(4, *pytest, str(ROOT / HDF5_FILE))],
-                      needs_mpi=True, needs_parallel_h5=True))
-    if full:
+    if inside(HDF5_FILE):
+        steps.append(Step('test_hdf5io.py on 4 ranks', [mpi(4, *pytest, str(ROOT / HDF5_FILE))],
+                          needs_mpi=True, needs_parallel_h5=True))
+    if full and inside(HDF5_CROSS[0]):
         w, r = HDF5_CROSS
         steps.append(Step('HDF5 cross-layout: write on 4 ranks, read on 2',
                           [mpi(4, str(ROOT / w)), mpi(2, str(ROOT / r))], needs_mpi=True, needs_parallel_h5=True))
@@ -167,6 +198,7 @@ def main(argv=None):
     p.add_argument('--quick', action='store_true', help='only the single-process tests')
     p.add_argument('--full', action='store_true', help='MPI tests on 1, 2 and 4 ranks and the cross-layout HDF5 test')
     p.add_argument('-k', metavar='TEXT', help='only the steps whose name contains TEXT')
+    p.add_argument('--chunk', choices=CHUNKS, help='only the tests of one chunk of the CI (the tests of every chunk are included)')
     p.add_argument('-v', '--verbose', action='store_true', help='print the output of every step')
     p.add_argument('--list', action='store_true', help='list the steps and exit')
     p.add_argument('--timeout', type=int, default=900, help='seconds allowed to each step (default 900)')
@@ -176,7 +208,7 @@ def main(argv=None):
 
     mpiexec, cores = find_mpiexec(), physical_cores()
     oversubscribe = args.oversubscribe or cores < 4                  # test_hdf5io.py needs 4 ranks
-    steps = build_steps(mpiexec or 'mpiexec', quick=args.quick, full=args.full, oversubscribe=oversubscribe)
+    steps = build_steps(mpiexec or 'mpiexec', quick=args.quick, full=args.full, oversubscribe=oversubscribe, chunk=args.chunk)
     if args.k:
         steps = [s for s in steps if args.k.lower() in s.name.lower()]
     if args.list:
