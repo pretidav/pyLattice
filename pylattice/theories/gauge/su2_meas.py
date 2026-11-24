@@ -29,8 +29,6 @@ import math
 from mpi4py import MPI
 
 from pylattice.core.cli import Logger
-from pylattice.core.hdf5io import describe
-from pylattice.core.measure import measure_files
 from pylattice.core.parallel import CartesianComm
 from pylattice.theories.gauge.su2 import load, plaquette_observables
 from pylattice.theories.gauge.sun import SU2Field
@@ -93,6 +91,8 @@ def main(argv=None):
     parser.add_argument('--debug', action='store_true', help='log at DEBUG level, from every rank')
     parser.add_argument('--logfile', action='store_true', help='also write the log to su2_meas.log')
     args = parser.parse_args(argv)
+    from pylattice.core.hdf5io import describe                        # h5py is needed only to read the checkpoints
+    from pylattice.core.measure import measure_files
     if not math.isfinite(args.beta) or args.beta < 0:
         parser.error('--beta must be finite and >= 0')
 

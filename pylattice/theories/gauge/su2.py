@@ -45,7 +45,6 @@ from pylattice.core.cli import Logger, Parser
 from pylattice.core.driver import run_simulation
 from pylattice.core.grid import LatticeComplexMatrix, LatticeReal
 from pylattice.core.groups import su2 as group
-from pylattice.core.hdf5io import load_into, restore_rng
 from pylattice.core.parallel import CartesianComm
 from pylattice.theories.gauge.sun import SU2Field
 
@@ -172,6 +171,7 @@ def load(field, filename, log=None, rng=None, label='restart', tol=1e-6):
     """Replaces the links of `field` by those of a checkpoint (see pylattice.core.hdf5io.load_into): the file must hold
     a field of this lattice and only SU(2) matrices. Returns the step it was saved at, if recorded. With rng its
     state is restored from the file too, when the layout of the ranks is the same: the run then continues exactly."""
+    from pylattice.core.hdf5io import load_into, restore_rng        # h5py is needed only to read a checkpoint
     log = log if log is not None else (lambda line: None)
     old = field.value.copy()
     step = load_into(field, filename, log, label)
