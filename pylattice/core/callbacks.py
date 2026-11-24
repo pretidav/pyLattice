@@ -2,14 +2,18 @@
 
     Checkpointer   saves the configuration to disk every few sweeps
     RunLog         writes a line of diagnostics to a text file every few sweeps
+    MeasurementFile  writes every measurement to a JSON file as soon as it is made
 
 They are called as callback(model, step, observables) after every sweep, thermalization included;
 step counts the sweeps since run() started. They run on every rank, at the same steps, because they
 use collective MPI calls.
 """
+import json
+import math
 import os
 import time
 
+import numpy as np
 import psutil
 from mpi4py import MPI
 
@@ -151,6 +155,78 @@ class RunLog:
             self.file.flush()
         self.last_step = step
         self.last_time = time.perf_counter()               # the time spent here is not counted in the speed
+
+    def finish(self, model, step):
+        if self.file is not None:
+            self.file.close()
+            self.file = None
+
+
+def _jsonable(value):
+    """a number or an array as plain JSON: numpy types converted, nan and inf (not JSON) as null"""
+    if isinstance(value, np.ndarray):
+        return [_jsonable(v) for v in value.tolist()]
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
+class MeasurementFile:
+    """Writes every measurement to a JSON file as soon as it is made, not at the end of the run.
+
+        {"measurements": [
+          {"sweep": 0, "m": 0.01, "e": -0.02, "acceptance": null},
+          {"sweep": 1, "m": 0.02, "e": -0.05, "acceptance": 0.46}
+        ]}
+
+    sweep and acceptance are those of the History (the sweep counts from the end of the
+    thermalization; the acceptance, null for the first measurement, covers the sweeps since the
+    previous one), the other entries are the observables of the model.
+
+    The file is a valid JSON document from the start (an empty list) and after every measurement: the
+    closing of the list is rewritten after each record and the file is flushed, so a job that dies
+    keeps all its measurements, and another program can read the file while the run goes on. Rank 0
+    writes it; an existing file is overwritten. nan and inf are written as null.
+
+    Read it with  json.load(open('meas.json'))['measurements']  (a list of dicts).
+    """
+    _HEADER = b'{"measurements": ['
+    _CLOSING = b'\n]}\n'
+
+    def __init__(self, filename='meas.json'):
+        self.filename = filename
+        self.file = None
+
+    def start(self, model):
+        comm = getattr(model, 'comm', MPI.COMM_WORLD)
+        if comm.Get_rank() == 0:
+            self.file = open(self.filename, 'wb')
+            self.file.write(self._HEADER + self._CLOSING)
+            self.file.flush()
+            self.end = len(self._HEADER)                      # where the next record goes
+            self.count = 0
+
+    def measurement(self, model, sweep, values, acceptance):
+        # every rank encodes the record (the values are the same on all of them), so a value that
+        # cannot be written fails everywhere at once instead of leaving the other ranks waiting for rank 0
+        record = {'sweep': sweep}
+        record.update({name: _jsonable(value) for name, value in values.items()})
+        record['acceptance'] = _jsonable(acceptance)
+        text = json.dumps(record, allow_nan=False).encode()
+        if self.file is None:
+            return
+        data = (b',' if self.count else b'') + b'\n  ' + text
+        self.file.seek(self.end)
+        self.file.write(data + self._CLOSING)                 # the record and the closing, in one write
+        self.file.flush()
+        self.end += len(data)
+        self.count += 1
 
     def finish(self, model, step):
         if self.file is not None:

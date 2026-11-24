@@ -12,6 +12,7 @@ exact averages of the 4x4 lattice, which has only 2^16 states.
 """
 import contextlib
 import io
+import json
 import logging
 import os
 import shutil
@@ -437,6 +438,9 @@ def test_command_line_driver():
         if cc.rank == 0:
             assert all(os.path.getsize(f) > 5000 for f in ('mag.png', 'ene.png', 'acc.png'))
             assert 'saved to ./mag.png' in out.getvalue() and 'MONTE CARLO' in out.getvalue()
+            records = json.load(open('meas.json'))['measurements']                              # written as the run went on
+            assert [r['sweep'] for r in records] == [0, 1, 2, 3, 4] and set(records[1]) == {'sweep', 'm', 'e', 'acceptance'}
+            assert records[0]['acceptance'] is None and all(0 <= r['acceptance'] <= 1 for r in records[1:])
     for handler in list(logging.getLogger('pylattice').handlers):                          # the Logger of main()
         logging.getLogger('pylattice').removeHandler(handler)
     with quiet(), pytest.raises(SystemExit) as exc:                                         # a bad command line stops early

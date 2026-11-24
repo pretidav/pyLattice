@@ -35,6 +35,20 @@ Comput. Phys. Commun. **156**, 143 (2004), [hep-lat/0306017](https://arxiv.org/a
 mpiexec -np 4 python -m pylattice.theories.spin.ising --grid=20x20 --mpigrid=2x2 --beta=1.5 --steps=2000
 ~~~
 
+Every run writes its measurements to `meas.json`, each one flushed to the file as soon as it is
+computed (not at the end), so the file can be read while the run goes on and survives a job that dies:
+
+~~~
+{"measurements": [
+  {"sweep": 0, "m": 0.026, "e": 0.01, "acceptance": null},
+  {"sweep": 1, "m": 0.056, "e": -0.957, "acceptance": 0.581}
+]}
+~~~
+
+It is valid JSON at every moment (`json.load(open('meas.json'))['measurements']`, or
+`pandas.DataFrame(...)`); the sweep counts from the end of the thermalization, and `acceptance` is
+that of the sweeps since the previous measurement. An existing `meas.json` is overwritten.
+
 Two options, both off by default, record the run (they need `--steps` sweeps to be longer than the interval):
 
 ~~~

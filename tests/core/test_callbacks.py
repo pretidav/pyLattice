@@ -6,6 +6,7 @@ process or on several ranks:
     mpiexec -n 2 python tests/core/test_callbacks.py        # 1, 2 or 4 ranks
 """
 import contextlib
+import json
 import os
 import shutil
 import tempfile
@@ -17,7 +18,7 @@ import pytest
 from mpi4py import MPI
 
 from pylattice.core import montecarlo
-from pylattice.core.callbacks import Checkpointer, RunLog
+from pylattice.core.callbacks import Checkpointer, MeasurementFile, RunLog
 from pylattice.core.grid import LatticeReal
 from pylattice.core.parallel import CartesianComm
 
@@ -180,6 +181,164 @@ def test_every_must_be_a_positive_integer():
             Checkpointer(bad)
     with pytest.raises(ValueError):
         Checkpointer(5, keep=0)
+
+
+# ================================================================== MeasurementFile
+def read_measurements(path):
+    with open(path) as f:
+        return json.load(f)['measurements']
+
+
+class Spy:
+    """Reads and parses the file at every moment the driver gives it a chance, and checks that it is
+    valid JSON holding exactly the measurements made so far: written when computed, not later."""
+
+    def __init__(self, path):
+        self.path = path
+        self.seen = []                                   # the measurements made so far, as they were given to the hook
+        self.reads = 0
+
+    def check(self):
+        if RANK == 0:
+            records = read_measurements(self.path)       # json.load: an error here means the file is not valid JSON
+            assert records == self.seen, (len(records), len(self.seen))
+            self.reads += 1
+
+    def start(self, model):
+        self.check()                                     # the file exists and holds an empty list from the start
+
+    def measurement(self, model, sweep, values, acceptance):
+        self.seen.append(dict(sweep=sweep, **values, acceptance=acceptance))
+        self.check()
+
+    def __call__(self, model, step, observables):
+        self.check()
+
+
+def test_measurement_file_is_valid_json_and_complete_after_every_measurement():
+    with shared_tempdir() as d:
+        path = os.path.join(d, 'meas.json')
+        spy = Spy(path)
+        h = montecarlo.run(Toy(), steps=10, thermalization=3, measure_every=2, progress=False,
+                           callbacks=[MeasurementFile(path), spy])               # the file first, then the spy that reads it
+        if RANK == 0:
+            assert spy.reads == 1 + 13 + 6                                       # at the start, after every sweep, at every measurement
+            records = read_measurements(path)
+            assert [r['sweep'] for r in records] == h.sweeps == [0, 2, 4, 6, 8, 10]
+            assert [r['x'] for r in records] == list(h['x']) == [3, 5, 7, 9, 11, 13]    # the observables of that sweep
+            assert [r['y'] for r in records] == list(h['y'])
+            assert [r['acceptance'] for r in records] == [None] + h.acceptance   # null for the first
+            assert all(list(r) == ['sweep', 'x', 'y', 'acceptance'] for r in records)
+        COMM.Barrier()
+
+
+def test_measurement_file_text_is_what_the_docstring_shows():
+    with shared_tempdir() as d:
+        path = os.path.join(d, 'meas.json')
+        montecarlo.run(Toy(), steps=2, progress=False, callbacks=[MeasurementFile(path)])
+        if RANK == 0:
+            text = open(path).read()
+            assert text.startswith('{"measurements": [\n  {"sweep": 0, "x": 0.0, "y": 0.0, "acceptance": null},\n  {"sweep": 1, ')
+            assert text.endswith('}\n]}\n') and text.count('\n') == 5
+        COMM.Barrier()
+
+
+def test_measurement_file_without_measurements_is_an_empty_list():
+    with shared_tempdir() as d:
+        path = os.path.join(d, 'meas.json')
+        montecarlo.run(Toy(), steps=4, thermalization=2, progress=False, measure=False, callbacks=[MeasurementFile(path)])
+        if RANK == 0:
+            assert json.load(open(path)) == {'measurements': []}
+        COMM.Barrier()
+
+
+def test_measurement_file_keeps_what_was_measured_when_the_job_dies():
+    class Dies:
+        def __call__(self, model, step, observables):
+            if step == 7:
+                raise RuntimeError('the job dies here')
+    with shared_tempdir() as d:
+        path = os.path.join(d, 'meas.json')
+        with pytest.raises(RuntimeError):                                        # finish() is never called
+            montecarlo.run(Toy(), steps=20, progress=False, callbacks=[MeasurementFile(path), Dies()])
+        if RANK == 0:
+            assert [r['sweep'] for r in read_measurements(path)] == list(range(8))   # sweeps 0..7, all there
+        COMM.Barrier()
+
+
+def test_measurement_file_is_strict_json_for_nan_inf_and_numpy_values():
+    class Odd(Toy):
+        def sweep(self, rng):
+            super().sweep(rng)
+            return 0, 0                                                          # nothing attempted: the acceptance is nan
+
+        def observables(self):
+            return {'f32': np.float32(1.5), 'arr': np.array([1, 2]), 'nan': float('nan'), 'inf': np.inf, 'int': np.int64(3)}
+
+    def refuse(constant):
+        raise AssertionError('not strict JSON: ' + constant)
+    with shared_tempdir() as d:
+        path = os.path.join(d, 'meas.json')
+        montecarlo.run(Odd(), steps=2, progress=False, callbacks=[MeasurementFile(path)])
+        if RANK == 0:
+            records = json.loads(open(path).read(), parse_constant=refuse)['measurements']   # NaN or Infinity would refuse
+            assert records[0] == {'sweep': 0, 'f32': 1.5, 'arr': [1, 2], 'nan': None, 'inf': None, 'int': 3, 'acceptance': None}
+            assert records[1]['acceptance'] is None and len(records) == 3
+        COMM.Barrier()
+
+
+def test_measurement_file_converts_nan_inside_lists_and_dicts():
+    class Nested(Toy):
+        def observables(self):
+            return {'v': [1.0, float('nan'), np.float32(2.5)], 'd': {'a': np.inf, 'b': (np.int64(1), 2)}}
+    with shared_tempdir() as d:
+        path = os.path.join(d, 'meas.json')
+        montecarlo.run(Nested(), steps=1, progress=False, callbacks=[MeasurementFile(path)])
+        if RANK == 0:
+            first = json.loads(open(path).read(), parse_constant=lambda c: pytest.fail(c))['measurements'][0]
+            assert first['v'] == [1.0, None, 2.5] and first['d'] == {'a': None, 'b': [1, 2]}
+        COMM.Barrier()
+
+
+def test_a_value_that_cannot_be_written_stops_the_run_and_leaves_the_file_valid():
+    class Bad(Toy):
+        def observables(self):
+            return {'x': float(self.sweeps)} if self.sweeps < 3 else {'x': {1, 2}}        # a set is not JSON
+    with shared_tempdir() as d:
+        path = os.path.join(d, 'meas.json')
+        with pytest.raises(TypeError):
+            montecarlo.run(Bad(), steps=10, progress=False, callbacks=[MeasurementFile(path)])
+        if RANK == 0:
+            assert [r['sweep'] for r in read_measurements(path)] == [0, 1, 2]             # what was good is kept, nothing half-written
+        COMM.Barrier()
+
+
+def test_measurement_file_is_written_by_rank_zero_and_overwritten_by_the_next_run():
+    with shared_tempdir() as d:
+        path = os.path.join(d, 'meas.json')
+        montecarlo.run(Toy(), steps=8, progress=False, callbacks=[MeasurementFile(path)])
+        montecarlo.run(Toy(), steps=3, progress=False, callbacks=[MeasurementFile(path)])
+        if RANK == 0:
+            assert len(read_measurements(path)) == 4                             # 0..3, not 9 + 4 and not once per rank
+        COMM.Barrier()
+
+
+def test_measurement_file_holds_the_history_of_a_real_run():
+    from pylattice.theories.spin.ising import IsingField, IsingModel
+    cc = CartesianComm(mpigrid={1: [1, 1], 2: [2, 1], 4: [2, 2]}[SIZE])
+    model = IsingModel(field=IsingField(grid=[4, 4], cartesiancomm=cc, initialization='random', seed=cc.rng(5)),
+                       logger=None, beta=0.4, rng=cc.rng(5))
+    with shared_tempdir() as d:
+        path = os.path.join(d, 'meas.json')
+        model.run_mc(steps=12, thermalization=4, measure_every=3, online_obs=True, progress=False,
+                     callbacks=[MeasurementFile(path)])
+        if RANK == 0:
+            records = read_measurements(path)
+            h = model.history
+            assert [r['sweep'] for r in records] == h.sweeps == [0, 3, 6, 9, 12]
+            assert [r['m'] for r in records] == list(h['m']) and [r['e'] for r in records] == list(h['e'])
+            assert [r['acceptance'] for r in records] == [None] + h.acceptance
+        COMM.Barrier()
 
 
 # ====================================================================== Checkpointer

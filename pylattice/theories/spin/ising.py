@@ -4,7 +4,7 @@ from copy import copy
 from pylattice.core.parallel import CartesianComm, pprint
 from pylattice.core.cli import Parser, Logger
 from pylattice.core import montecarlo
-from pylattice.core.callbacks import Checkpointer, RunLog
+from pylattice.core.callbacks import Checkpointer, RunLog, MeasurementFile
 
 class IsingField(LatticeReal):
     def __init__(self,grid,cartesiancomm, initialization='cold', seed = 0): 
@@ -153,7 +153,7 @@ def main(argv=None):
     field = IsingField(grid=PP.grid, cartesiancomm=CC, initialization='random', seed=rng)
     model = IsingModel(field=field, logger=LL.log, beta=PP.beta, rng=rng)
 
-    callbacks = []
+    callbacks = [MeasurementFile('meas.json')]          # every measurement, as soon as it is made
     if PP.checkpoint_every:
         callbacks.append(Checkpointer(PP.checkpoint_every, directory='checkpoints', prefix='ising', final=True))
     if PP.runlog_every:

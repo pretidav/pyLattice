@@ -21,8 +21,11 @@ Callbacks (see pylattice.core.callbacks: Checkpointer, RunLog) are objects calle
 callback(model, step, observables) after every sweep, thermalization included. step counts the
 sweeps since run() started (1, 2, ...); observables() gives the observables of the current
 configuration, computed at most once per sweep however many ask. A callback may also have
-start(model), called before the first sweep, and finish(model, step), called after the last one.
-Callbacks run on every rank at the same steps, so they may use collective MPI calls.
+start(model), called before the first sweep, and finish(model, step), called after the last one,
+and measurement(model, sweep, values, acceptance), called as soon as a measurement is made (the
+sweep is counted after the thermalization, as in History; the acceptance is None for the first).
+Every part is optional: an object that is not callable only gets the hooks it has. Callbacks run on
+every rank at the same steps, so they may use collective MPI calls.
 """
 import numpy as np
 from mpi4py import MPI
@@ -160,11 +163,18 @@ def run(model, steps, thermalization=0, measure_every=1, progress=True, measure=
         rng = rank_rng(0, comm)
     history = History()
     callbacks = list(callbacks)
+    every_sweep = [callback for callback in callbacks if callable(callback)]
     observables = _Once(model.observables)
     accepted = attempted = 0                               # this rank, since the last measurement
     step = 0                                               # sweeps made, thermalization included
     for callback in callbacks:
         getattr(callback, 'start', lambda model: None)(model)
+
+    def measured(sweep, acceptance):
+        history.record(sweep, observables(), acceptance)
+        for callback in callbacks:
+            getattr(callback, 'measurement', lambda *args: None)(model, sweep, observables(), acceptance)
+
     bar = Progress(TextColumn('[progress.description]{task.description}'), BarColumn(), MofNCompleteColumn(),
                    TimeElapsedColumn(), TimeRemainingColumn(),
                    disable=not (progress and comm.Get_rank() == 0))
@@ -174,13 +184,13 @@ def run(model, steps, thermalization=0, measure_every=1, progress=True, measure=
             model.sweep(rng)
             step += 1
             observables.reset()
-            for callback in callbacks:
+            for callback in every_sweep:
                 callback(model, step, observables)
             bar.advance(task)
         if thermalization:
             bar.update(task, description='MONTE CARLO')
         if measure:
-            history.record(0, observables())
+            measured(0, None)
         for n in range(1, steps + 1):
             a, t = model.sweep(rng)
             step += 1
@@ -189,10 +199,9 @@ def run(model, steps, thermalization=0, measure_every=1, progress=True, measure=
             attempted += int(t)
             if measure and n % measure_every == 0:
                 total_accepted, total_attempted = comm.allreduce(np.array([accepted, attempted]))
-                history.record(n, observables(),
-                               total_accepted / total_attempted if total_attempted else float('nan'))
+                measured(n, total_accepted / total_attempted if total_attempted else float('nan'))
                 accepted = attempted = 0
-            for callback in callbacks:
+            for callback in every_sweep:
                 callback(model, step, observables)
             bar.advance(task)
     for callback in callbacks:

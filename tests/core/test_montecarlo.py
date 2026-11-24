@@ -168,6 +168,54 @@ def test_callbacks_are_called_after_every_sweep_thermalization_included():
     assert hooks.events[-1] == ('finish', 5, 5) and len(hooks.events) == 7
 
 
+class OnlyMeasurements:
+    """not callable: it has just the measurement hook"""
+
+    def __init__(self):
+        self.events = []
+
+    def measurement(self, model, sweep, values, acceptance):
+        self.events.append((model.sweeps, sweep, dict(values), acceptance))
+
+
+def test_the_measurement_hook_is_called_when_a_measurement_is_made():
+    toy, hook = Toy(), OnlyMeasurements()
+    h = montecarlo.run(toy, steps=6, thermalization=3, measure_every=2, progress=False, callbacks=[hook])
+    # the model is at sweep 3 + n when measurement n is made; the thermalization is not measured
+    assert [e[:2] for e in hook.events] == [(3, 0), (5, 2), (7, 4), (9, 6)]
+    assert [e[1] for e in hook.events] == h.sweeps                              # the same sweeps as the History
+    assert [e[2] for e in hook.events] == [{'x': 3.0 + n, 'y': 6.0 + 2 * n} for n in (0, 2, 4, 6)]
+    assert [e[3] for e in hook.events] == [None] + h.acceptance                 # no acceptance for the first measurement
+    # no measurement, no call
+    hook2 = OnlyMeasurements()
+    montecarlo.run(Toy(), steps=4, progress=False, measure=False, callbacks=[hook2])
+    assert hook2.events == []
+
+
+def test_the_measurement_hook_comes_before_the_per_sweep_callbacks_of_that_sweep():
+    order = []
+
+    class Both(OnlyMeasurements):
+        def __call__(self, model, step, observables):
+            order.append(('sweep', step))
+
+        def measurement(self, model, sweep, values, acceptance):
+            order.append(('measurement', sweep))
+
+    montecarlo.run(Toy(), steps=4, thermalization=1, measure_every=2, progress=False, callbacks=[Both()])
+    # 'sweep' is the step, which counts the thermalization sweep; 'measurement' is the sweep after it:
+    # measurement 2 is made during step 3, before the callbacks of that step
+    assert order == [('sweep', 1), ('measurement', 0), ('sweep', 2), ('measurement', 2), ('sweep', 3),
+                     ('sweep', 4), ('measurement', 4), ('sweep', 5)]
+
+
+def test_the_hook_sees_the_observables_without_computing_them_again():
+    toy, hook = Toy(), OnlyMeasurements()
+    montecarlo.run(toy, steps=5, progress=False, callbacks=[hook])
+    assert toy.calls.count('o') == 6 and len(hook.events) == 6                  # one call per measurement, shared with the History
+    assert all(c == toy.calls for c in COMM.allgather(toy.calls))
+
+
 def test_callbacks_can_be_plain_functions_and_any_iterable():
     seen = []
     montecarlo.run(Toy(), steps=3, progress=False, callbacks=(lambda model, step, observables: seen.append(step),))

@@ -4,6 +4,15 @@ import math
 
 from rich.logging import RichHandler
 
+"""
+__| |_________| |__
+__   _________   __
+  | |         | |  
+  | |pyLattice| |  
+__| |_________| |__
+__   _________   __
+  | |         | |  
+"""
 
 def _steps(text):
     try:
