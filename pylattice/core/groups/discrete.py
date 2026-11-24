@@ -1,9 +1,9 @@
 """Finite groups: Z2 (the Ising spin) and the cyclic groups Z_q (the clock model; Z3 is the Potts model of
 three states). The elements are numbers, so a coupling is a product of values: the roots of unity
-exp(2 pi i k / q), k = 0 .. q-1; for Z2 they are the real numbers +1 and -1 (float). `index` and
+exp(2 pi i k / q), k = 0 .. q-1; for Z2 they are the integers +1 and -1 (int8: a spin takes one byte). `index` and
 `from_index` go between the numbers and the labels k, where the group is the addition of the labels mod q.
 
-    Z2.elements  -> [ 1., -1.]          Z(3).elements -> [1, exp(2 pi i/3), exp(4 pi i/3)]
+    Z2.elements  -> [ 1, -1]            Z(3).elements -> [1, exp(2 pi i/3), exp(4 pi i/3)]
     Z2.multiply(-1, -1) == 1            Z2.project(0.3) == 1 (nearest element)
     Z2.heatbath(h, beta, rng)           the exact heat bath of a value with neighbour sum h
 
@@ -95,7 +95,7 @@ class CyclicGroup(DiscreteGroup):
         self.order = self.q = int(q)
         self.name = 'Z{}'.format(self.q)
         k = np.arange(self.q)
-        self.elements = np.array([1.0, -1.0]) if q == 2 else np.exp(2j * np.pi * k / q)
+        self.elements = np.array([1, -1], dtype=np.int8) if q == 2 else np.exp(2j * np.pi * k / q)
         self.table = (k[:, None] + k[None, :]) % self.q
         self.inverse_labels = (-k) % self.q
         self.elements.setflags(write=False)

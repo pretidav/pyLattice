@@ -9,7 +9,7 @@ acceptance step or a heat bath yet.
 """
 import numpy as np
 
-from pylattice.core.grid import LatticeVectorComplexMatrix
+from pylattice.core.grid import LatticeComplexMatrix, LatticeVectorComplexMatrix
 from pylattice.core.groups import su2 as sun
 
 
@@ -54,11 +54,76 @@ class SU2Field(LatticeVectorComplexMatrix):
         X = sun.to_matrix(sun.near_identity_quaternion(eps, rng, size=self.value.shape[:2]))
         self.value = X @ self.value
 
-    def Staple(self):
-        raise NotImplementedError("the staples need the Wilson action, which is not written yet")
+    def random_gauge_transformation(self, rng=None):
+        """an independent Haar-uniform SU(2) element on every site, shape (sites, 2, 2)"""
+        rng = rng if rng is not None else self.rng
+        return sun.to_matrix(sun.random_quaternion(rng, size=self.value.shape[:1]))
+
+    def gauge_transform(self, g=None, rng=None):
+        """The field after the gauge transformation g (an SU(2) matrix on every site, a LatticeComplexMatrix or an
+        array of shape (sites, 2, 2)):   U'_mu(x) = g(x) U_mu(x) g(x + mu)^+
+        Returns a new SU2Field and leaves this one unchanged. With g=None a random transformation is drawn
+        (from rng). Every gauge-invariant quantity (Plaq, Action) is the same on both fields."""
+        if g is None:
+            g = self.random_gauge_transformation(rng)
+        if not isinstance(g, LatticeComplexMatrix):
+            g = np.asarray(g, dtype=complex)
+            if g.shape != (self.value.shape[0], self.N, self.N):
+                raise ValueError("g must have shape {}, not {}".format((self.value.shape[0], self.N, self.N), g.shape))
+            G = LatticeComplexMatrix(grid=self.grid, cartesiancomm=self.cartesiancomm, N=self.N)
+            G.value = g
+            g = G
+        out = SU2Field(grid=self.grid, cartesiancomm=self.cartesiancomm, Nd=self.Nd, rng=self.rng)
+        for mu in range(self.Nd):
+            out.poke_index(mu, g * self.peek_index(mu) * g.shift_forward(mu).adj())
+        return out
+
+    def _check_directions(self, *directions):
+        if self.Nd < 2:
+            raise ValueError("plaquettes and staples need at least 2 dimensions")
+        for mu in directions:
+            if not 0 <= mu < self.Nd:
+                raise ValueError("direction {} is not in 0..{}".format(mu, self.Nd - 1))
+
+    def Plaquette_field(self, mu, nu):
+        """P_{mu nu}(x) = U_mu(x) U_nu(x+mu) U_mu(x+nu)^+ U_nu(x)^+ on every site (a LatticeComplexMatrix)"""
+        self._check_directions(mu, nu)
+        if mu == nu:
+            raise ValueError("a plaquette needs two different directions")
+        Umu, Unu = self.peek_index(mu), self.peek_index(nu)
+        return Umu * Unu.shift_forward(mu) * Umu.shift_forward(nu).adj() * Unu.adj()
+
+    def Staple(self, mu):
+        """The sum of the 2 (Nd - 1) staples of the links in direction mu (a LatticeComplexMatrix). For nu != mu:
+            U_nu(x+mu) U_mu(x+nu)^+ U_nu(x)^+   +   U_nu(x+mu-nu)^+ U_mu(x-nu)^+ U_nu(x-nu)
+        so that Re tr(U_mu(x) Staple_mu(x)) is the sum of the plaquettes that contain the link."""
+        self._check_directions(mu)
+        Umu, staple = self.peek_index(mu), None
+        for nu in (nu for nu in range(self.Nd) if nu != mu):
+            Unu = self.peek_index(nu)
+            Unu_mu = Unu.shift_forward(mu)
+            upper = Unu_mu * Umu.shift_forward(nu).adj() * Unu.adj()
+            lower = Unu_mu.shift_backward(nu).adj() * Umu.shift_backward(nu).adj() * Unu.shift_backward(nu)
+            staple = upper + lower if staple is None else staple + upper + lower
+        return staple
+
+    def _trace_sum(self, pairs):
+        """sum over all the sites of the whole lattice and the given (mu, nu) of tr P_{mu nu}, and the number of terms"""
+        total = sum((self.Plaquette_field(mu, nu).trace() for mu, nu in pairs[1:]), self.Plaquette_field(*pairs[0]).trace())
+        sites = int(np.prod(self.grid) * np.prod(self.cartesiancomm.mpigrid))
+        return complex(total.reducesum()), sites * len(pairs)
 
     def Plaq(self):
-        raise NotImplementedError("the plaquette needs the staples, which are not written yet")
+        """The plaquette (1/N) tr P averaged over all the sites and all the ordered pairs mu != nu of the whole lattice:
+        a complex number (1 for a cold field). P_{nu mu} = P_{mu nu}^+, so the imaginary part vanishes up to
+        rounding: it is a check of the links and the shifts."""
+        self._check_directions()
+        total, count = self._trace_sum([(mu, nu) for mu in range(self.Nd) for nu in range(self.Nd) if mu != nu])
+        return total / (self.N * count)
 
-    def Action(self):
-        raise NotImplementedError("the Wilson action is not written yet")
+    def Action(self, beta):
+        """the Wilson action S = beta sum_{x, mu<nu} (1 - (1/N) Re tr P_{mu nu}(x)) of the whole lattice
+        (the same value on every rank; 0 for a cold field)"""
+        self._check_directions()
+        total, count = self._trace_sum([(mu, nu) for mu in range(self.Nd) for nu in range(mu + 1, self.Nd)])
+        return beta * (count - total.real / self.N)

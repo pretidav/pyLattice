@@ -1,31 +1,32 @@
-from pylattice.core.grid import LatticeReal,LatticeVectorReal
+from pylattice.core.grid import LatticeReal
 import numpy as np 
-from copy import copy
 from pylattice.core.parallel import CartesianComm, pprint
-from pylattice.core.cli import Parser, Logger, log_banner
+from pylattice.core.cli import Parser, Logger
+from pylattice.core.driver import run_simulation
 from pylattice.core import montecarlo
 from pylattice.core.groups.discrete import Z2
-from pylattice.core.callbacks import Checkpointer, RunLog, MeasurementFile
 
 class IsingField(LatticeReal):
-    """A spin on each site with values in the group Z2 (+1, -1; pylattice.core.groups.discrete)."""
+    """A spin on each site with values in the group Z2 (the integers +1, -1, stored as int8: one byte per spin;
+    pylattice.core.groups.discrete).
+    initialization: 'cold' every spin +1 (the identity of Z2, an ordered start), 'hot' every spin random, +1 or -1 with
+    equal probability. seed (for 'hot'): an integer, or a numpy Generator (CartesianComm.rng(seed): one independent
+    stream per rank, which the model can go on using). The same integer on every rank would give every rank the
+    same block of spins."""
     def __init__(self,grid,cartesiancomm, initialization='cold', seed = 0): 
         super().__init__(grid,cartesiancomm)
+        self.value = self.value.astype(Z2.elements.dtype)                   # integer spins, not floating point
+        if initialization not in ('cold', 'hot'):
+            raise ValueError("initialization must be 'cold' or 'hot', not {!r}".format(initialization))
         self.seed = seed 
         self.initialization = initialization
         self.init()  
 
     def init(self): 
-        if self.initialization=='hot': 
-            self.value[:]=Z2.identity(self.value.shape)
         if self.initialization=='cold': 
-            self.value[:]=Z2.generator
-        if self.initialization=='random': 
-            # seed: an integer, or a numpy Generator (CartesianComm.rng(seed): one independent stream
-            # per rank, which the model can go on using). The same integer on every rank would give
-            # every rank the same block.
-            rng = np.random.default_rng(self.seed)
-            self.value[:]=Z2.random(rng,self.value.shape)
+            self.value[:]=Z2.identity(self.value.shape)
+        if self.initialization=='hot': 
+            self.value[:]=Z2.random(np.random.default_rng(self.seed),self.value.shape)
 
     def load(self, filename, log=None, rng=None, label='restart'):
         """Replaces the spins by those of a checkpoint (see pylattice.core.hdf5io.load_into). The file must
@@ -36,7 +37,9 @@ class IsingField(LatticeReal):
         log = log if log is not None else (lambda line: None)
         old = self.value.copy()
         step = load_into(self, filename, log, label)
-        bad = self.cartesiancomm.comm.allreduce(int(np.count_nonzero(~Z2.contains(self.value))))
+        not_ising = LatticeReal(grid=self.grid, cartesiancomm=self.cartesiancomm)
+        not_ising.value = (~Z2.contains(self.value)).astype(np.float64)
+        bad = int(not_ising.reducesum())                                  # how many sites hold something else, on all ranks
         if bad:
             self.value[...] = old
             raise ValueError("cannot restart from '{}': {} values are not +1 or -1, this is not an Ising "
@@ -60,65 +63,41 @@ class IsingModel():
         self.mlist, self.elist, self.nlist, self.acclist = [],[],[], []
         self.M = self.magnetization()
         self.E = 0
-        self.nn_field = self.get_nn_field() 
-        self.local_E = self.local_energy(self.field)
-    
+
     def magnetization(self): 
         return self.field.average()
-    
+
     def energy(self):
-        # H = -sum_<ij> s_i s_j, energy per site. local_E sums s_i * (neighbours) over the sites,
+        # H = -sum_<ij> s_i s_j, energy per site. local_energy sums s_i * (neighbours) over the sites,
         # which counts every bond twice
-        self.local_E = self.local_energy(input_field=self.field)
-        return -0.5*self.local_E.average()
+        return -0.5*self.local_energy(self.field).average()
 
-    def get_nn_field(self): 
-        out = LatticeVectorReal(grid=self.field.grid,cartesiancomm=self.field.cartesiancomm, Nd=len(self.field.grid)*2)
-        for mu in range(len(self.field.grid)):
-            lattice = copy(self.field)
-            lattice.movebackward(mu=mu) 
-            out.poke_index(mu=mu,obj=lattice)
-            del lattice 
-        for mu in range(len(self.field.grid)):
-            lattice = copy(self.field)
-            lattice.moveforward(mu=mu) 
-            out.poke_index(mu=mu+len(self.field.grid),obj=lattice)
-            del lattice
-        return out
+    def neighbour_sum(self, field):
+        """the sum of the 2d nearest neighbours of every site (a LatticeReal), across the rank boundaries"""
+        total = None
+        for mu in range(len(field.grid)):
+            both = field.shift_forward(mu) + field.shift_backward(mu)
+            total = both if total is None else total + both
+        return total
 
-    def local_energy(self,input_field):
-        # s_i * (sum of the 2d neighbours of i), with the neighbours taken from self.nn_field:
-        # self.nn_field must be up to date with the configuration of the neighbours
-        local_E = IsingField(grid=input_field.grid, cartesiancomm=input_field.cartesiancomm)
-        local_E.fill_value(n=0)
-        for mu in range(len(input_field.grid)): 
-            local_E = local_E + (self.nn_field.peek_index(mu) + self.nn_field.peek_index(mu+len(input_field.grid))) * input_field
-        return local_E
-    
-    def global_update(self,rng=None):
+    def local_energy(self, field):
+        """s_i * (sum of the 2d neighbours of i) on every site"""
+        return field * self.neighbour_sum(field)
+
+    def global_update(self, rng=None):
+        """One sweep: the even sites, then the odd ones (their neighbours are the even spins just updated).
+        A spin is flipped with the Metropolis test of the energy change dE_i = 2 s_i sum_nn s_j,
+        H = -sum_<ij> s_i s_j. Returns the number of flips on this rank."""
         rng = self.rng if rng is None else rng
-        # energy change of flipping each spin, H = -sum_<ij> s_i s_j:  dE_i = 2 s_i sum_nn s_j
-        #Even Update
-        delta_energy = self.local_energy(self.field)*2
-        delta_energy_E, _ = delta_energy.peek_EO_lattices()
-        field_E, _ = self.field.peek_EO_lattices()
-        acc_E = self.metropolis_test(deltaE = delta_energy_E, rng = rng)
-        field_E.value[:]=np.where(acc_E,Z2.multiply(field_E.value,Z2.generator),field_E.value)   # a flip: times the non-trivial element
-        self.field.poke_EO_lattices(E_lattice=field_E)
-
-        #Odd Update (its neighbours are the even spins just updated)
-        self.nn_field = self.get_nn_field()
-        delta_energy = self.local_energy(self.field)*2
-        _,delta_energy_O = delta_energy.peek_EO_lattices()
-        _, field_O = self.field.peek_EO_lattices()
-        acc_O = self.metropolis_test(deltaE = delta_energy_O, rng = rng)
-        field_O.value[:]=np.where(acc_O,Z2.multiply(field_O.value,Z2.generator),field_O.value)
-        self.field.poke_EO_lattices(O_lattice=field_O)
-        
-        self.nn_field = self.get_nn_field() 
-        self.local_E = self.local_energy(self.field)
-
-        return (np.sum(acc_E)+np.sum(acc_O))
+        accepted = 0
+        for parity, half in enumerate(('E_lattice', 'O_lattice')):
+            delta_energy = (self.local_energy(self.field) * 2).peek_EO_lattices()[parity]
+            spins = self.field.peek_EO_lattices()[parity]
+            flip = self.metropolis_test(deltaE=delta_energy, rng=rng)
+            spins.value[:] = np.where(flip, Z2.multiply(spins.value, Z2.generator), spins.value)   # a flip: times the non-trivial element
+            self.field.poke_EO_lattices(**{half: spins})
+            accepted += np.sum(flip)
+        return accepted
 
     def metropolis_test(self,deltaE,rng=None):
         # the action is beta * H: the change of the action of a flip is beta * dE
@@ -159,24 +138,18 @@ def main(argv=None):
     """
     PP = Parser(argv)
     CC = CartesianComm(mpigrid=PP.mpigrid)
-    LL = Logger(debug=PP.debug, logfile=PP.logfile)
-    log_banner(LL.log, PP, CC.comm)               # logo, system and run information
+    LL = Logger(debug=PP.debug, logfile=PP.logfile is not None, filename=PP.logfile or 'run.log')
+    LL.banner(PP, CC.comm)                        # logo, system and run information, in boxes
     rng = CC.rng(PP.seed)                         # an independent stream on every rank
 
-    field = IsingField(grid=PP.grid, cartesiancomm=CC, initialization='random', seed=rng)
+    field = IsingField(grid=PP.grid, cartesiancomm=CC, initialization='hot', seed=rng)
     if PP.start_from:
         step = field.load(PP.start_from, log=LL.log.info, rng=rng)
         LL.log.info("restart: running {} new sweeps from the configuration saved at step {}; "
                     "the sweep counter starts afresh".format(PP.steps, step))
     model = IsingModel(field=field, logger=LL.log, beta=PP.beta, rng=rng)
 
-    callbacks = [MeasurementFile('meas.json')]          # every measurement, as soon as it is made
-    if PP.checkpoint_every:
-        callbacks.append(Checkpointer(PP.checkpoint_every, directory='checkpoints', prefix='ising', final=True))
-    if PP.runlog_every:
-        callbacks.append(RunLog(PP.runlog_every, filename='run.log'))
-    model.run_mc(steps=PP.steps, online_obs=True, callbacks=callbacks)
-    LL.log.info('done: measurements in meas.json (print and plot them with: python -m pylattice.utils.plot_meas meas.json)')
+    run_simulation(model, PP, LL, prefix='ising')     # sweeps, measurement file, checkpoints, run log, summary
 
 
 if __name__ == '__main__':

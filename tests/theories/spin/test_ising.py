@@ -100,17 +100,21 @@ def quiet():
 def test_field_initializations():
     cc, loc = setup([8, 8])
     n = int(np.prod(loc))
-    for init, value in (('hot', 1.0), ('cold', -1.0)):             # both are ordered starts
-        f = IsingField(grid=loc, cartesiancomm=cc, initialization=init)
-        assert isinstance(f, LatticeReal) and f.value.dtype == np.float32 and f.value.shape == (n,)
-        assert (f.value == value).all()
-    assert (IsingField(grid=loc, cartesiancomm=cc).value == -1).all()                       # default: cold
-    a = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=1)
-    b = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=1)
-    c = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=2)
-    assert set(np.unique(a.value)) <= {-1.0, 1.0} and a.value.dtype == np.float32
+    f = IsingField(grid=loc, cartesiancomm=cc, initialization='cold')                     # cold: ordered, every spin +1
+    assert isinstance(f, LatticeReal) and f.value.dtype == np.int8 and f.value.shape == (n,)
+    assert (f.value == 1).all()
+    assert (IsingField(grid=loc, cartesiancomm=cc).value == 1).all()                        # default: cold
+    with pytest.raises(ValueError, match='initialization'):
+        IsingField(grid=loc, cartesiancomm=cc, initialization='random')
+    with pytest.raises(ValueError):
+        IsingField(grid=loc, cartesiancomm=cc, initialization='warm')
+    a = IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=1)
+    b = IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=1)
+    c = IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=2)
+    assert set(np.unique(a.value)) <= {-1.0, 1.0} and a.value.dtype == np.int8
     assert (a.value == b.value).all() and not (a.value == c.value).all()                   # the seed decides
-    assert a.initialization == 'random' and a.seed == 1
+    assert a.initialization == 'hot' and a.seed == 1
+    assert {-1.0, 1.0} == set(np.unique(a.value))                                           # hot: random, both signs
 
 
 # ----------------------------------------------------------------------------- observables
@@ -131,34 +135,26 @@ def test_energy_per_site():
 
 
 # ----------------------------------------------------------------------------- neighbours
-def test_nn_field_holds_the_neighbours():
-    # component mu: the value at x - mu; component mu + d: the value at x + mu
+def test_neighbour_sum_is_the_sum_of_the_2d_neighbours_across_the_rank_boundaries():
     for G in ([4, 4], [4, 4, 4]):
-        d = len(G)
         glob = random_config(G, 5)
-        cc, loc, _, model = make(glob)
-        assert isinstance(model.nn_field, LatticeVectorReal) and model.nn_field.Nd == 2 * d
-        for mu in range(d):
-            back = to_global(cc, loc, model.nn_field.peek_index(mu).value)
-            fwd = to_global(cc, loc, model.nn_field.peek_index(mu + d).value)
-            assert (back == np.roll(glob, 1, axis=mu)).all()
-            assert (fwd == np.roll(glob, -1, axis=mu)).all()
+        cc, loc, field, model = make(glob)
+        assert isinstance(model.neighbour_sum(field), LatticeReal)
+        assert np.allclose(to_global(cc, loc, model.neighbour_sum(field).value), nn_sum(glob))
+        assert np.array_equal(field.value, glob[block(cc, loc)].reshape(-1))            # the field is not moved
 
 
-def test_local_energy_is_spin_times_its_neighbours():
+def test_local_energy_is_spin_times_its_neighbours_and_never_stale():
     for G in ([4, 4], [4, 4, 4]):
         glob = random_config(G, 7)
         cc, loc, field, model = make(glob)
-        got = to_global(cc, loc, model.local_energy(field).value)
-        assert np.allclose(got, glob * nn_sum(glob))
-    # it reads the neighbours from the cache nn_field: it is stale until get_nn_field() is called
+        assert np.allclose(to_global(cc, loc, model.local_energy(field).value), glob * nn_sum(glob))
     glob = random_config([4, 4], 8)
     cc, loc, field, model = make(glob)
     new = -glob
-    field.value[:] = new[block(cc, loc)].reshape(-1)
-    assert np.allclose(to_global(cc, loc, model.local_energy(field).value), new * nn_sum(glob))
-    model.nn_field = model.get_nn_field()
+    field.value[:] = new[block(cc, loc)].reshape(-1)                                    # change the spins: nothing to refresh
     assert np.allclose(to_global(cc, loc, model.local_energy(field).value), new * nn_sum(new))
+    assert abs(float(model.energy()) - energy_per_site(new)) < 1e-6
 
 
 # ----------------------------------------------------------------------------- Metropolis test
@@ -215,9 +211,6 @@ def test_global_update_odd_sites_see_the_updated_even_sites():
     acc = model.global_update()
     assert acc == field.value.size // 2
     assert (field.value == -1).all()
-    # the cache is up to date for the next sweep
-    back = to_global(cc, loc, model.nn_field.peek_index(0).value)
-    assert (back == -1).all() and (model.get_nn_field().peek_index(0).value == back[block(cc, loc)].reshape(-1)).all()
 
 
 # ----------------------------------------------------------------------------- sampling
@@ -226,7 +219,7 @@ def run_with_seed(seed, global_seed=None, steps=20):
         np.random.seed(global_seed)
     cc, loc = setup([8, 8])
     rng = cc.rng(seed)
-    field = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=rng)
+    field = IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=rng)
     model = IsingModel(field=field, logger=None, beta=0.4, rng=rng)
     with quiet():
         model.run_mc(steps=steps, online_obs=True, progress=False)
@@ -244,29 +237,29 @@ def test_a_run_is_fixed_by_its_seed_and_not_by_the_global_numpy_state():
 
 def test_the_ranks_start_and_run_with_different_random_numbers():
     cc, loc = setup([8, 8])
-    fields = cc.comm.allgather(IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=cc.rng(7)).value)
+    fields = cc.comm.allgather(IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=cc.rng(7)).value)
     for i in range(len(fields)):
         for j in range(i + 1, len(fields)):
             assert not np.array_equal(fields[i], fields[j])                                 # not the same block on every rank
     # an integer seed is the same on every rank: that is what the generators are for
-    same = cc.comm.allgather(IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=7).value)
+    same = cc.comm.allgather(IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=7).value)
     assert all(np.array_equal(same[0], f) for f in same)
 
 
 def test_the_random_start_takes_an_integer_or_a_generator():
     cc, loc = setup([8, 8])
-    from_int = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=5)
-    from_gen = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=np.random.default_rng(5))
+    from_int = IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=5)
+    from_gen = IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=np.random.default_rng(5))
     assert np.array_equal(from_int.value, from_gen.value) and set(np.unique(from_int.value)) <= {-1.0, 1.0}
     rng, fresh = np.random.default_rng(5), np.random.default_rng(5)
-    IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=rng)
+    IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=rng)
     assert rng.random() != fresh.random()                                                   # the generator was used, and goes on
 
 
 def test_the_updates_draw_only_from_the_model_generator():
     cc, loc = setup([4, 4])
     rng = np.random.default_rng(3)
-    model = IsingModel(field=IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=1), logger=None, beta=0.4, rng=rng)
+    model = IsingModel(field=IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=1), logger=None, beta=0.4, rng=rng)
     state = rng.bit_generator.state
     other = np.random.default_rng(99)
     model.global_update(other)                                                              # a generator given to the call is used...
@@ -289,7 +282,7 @@ def test_sampling_matches_the_exact_4x4_averages():
     for beta in (0.3, 0.6):
         cc, loc = setup([4, 4])
         rng = cc.rng(11)
-        field = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=rng)
+        field = IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=rng)
         model = IsingModel(field=field, logger=None, beta=beta, rng=rng)
         with quiet():
             model.run_mc(steps=3300, online_obs=True, progress=False)
@@ -305,7 +298,7 @@ def test_sampling_matches_the_exact_4x4_averages():
 def test_run_mc_bookkeeping():
     log = logging.getLogger('ising-test')
     cc, loc = setup([4, 4])
-    field = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=cc.rng(2))
+    field = IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=cc.rng(2))
     model = IsingModel(field=field, logger=log, beta=0.4)
     assert model.log is log and model.beta == 0.4
     assert (model.mlist, model.elist, model.nlist, model.acclist) == ([], [], [], [])
@@ -347,7 +340,7 @@ def test_run_mc_thermalization_and_thinning():
             self.sweeps += 1
             return super().global_update(rng)
     cc, loc = setup([4, 4])
-    model = Counting(field=IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=cc.rng(3)),
+    model = Counting(field=IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=cc.rng(3)),
                      logger=None, beta=0.4)
     with quiet():
         model.run_mc(steps=10, online_obs=True, progress=False, thermalization=5, measure_every=2)
@@ -389,10 +382,13 @@ def test_command_line_driver_with_checkpoints_and_run_log():
             main(argv + ['--runlog-every=3'] + (['--checkpoint-every=3'] if parallel_hdf5() else []))
         cc.comm.Barrier()
         if cc.rank == 0:
-            lines = open('run.log').read().splitlines()
+            content = open('run.log', encoding='utf-8').read()
+            lines = [l for l in content.splitlines() if l.startswith('step=')]                 # the lines of the run log
             assert len(lines) == 2                                                             # sweeps 3 and 6 of 7
             keys = [item.split('=')[0] for item in lines[0].split()]
             assert keys == ['step', 'm', 'e', 'mem_MB', 'cpu_pct', 'steps_per_s']
+            assert 'pyLattice' in content and '\u256d\u2500 system' in content and '\u256d\u2500 done' in content   # one file: boxes, lines, summary
+            assert content.index('\u256d\u2500 run') < content.index('step=3') < content.index('\u256d\u2500 done')
             if parallel_hdf5():
                 assert sorted(os.listdir('checkpoints')) == ['ising_00000003.hdf5', 'ising_00000006.hdf5', 'ising_00000007.hdf5']
             else:
@@ -407,6 +403,19 @@ def test_command_line_driver_with_checkpoints_and_run_log():
             shutil.rmtree(path, ignore_errors=True)
 
 
+def test_command_line_driver_draws_the_progress_bar_only_when_asked():
+    cc, loc = setup([4, 4])
+    argv = ['--grid=' + 'x'.join(map(str, loc)), '--mpigrid=' + 'x'.join(map(str, cc.mpigrid)), '--steps=4', '--progress',
+            '--logfile=off']
+    with in_tempdir():
+        with quiet() as out:
+            main(argv)
+        if cc.rank == 0:
+            assert 'MONTE CARLO' in out.getvalue() and not os.path.exists('run.log')              # --logfile=off: no file
+    for handler in list(logging.getLogger('pylattice').handlers):
+        logging.getLogger('pylattice').removeHandler(handler)
+
+
 def test_command_line_driver():
     cc, loc = setup([4, 4])
     argv = ['--grid=' + 'x'.join(map(str, loc)), '--mpigrid=' + 'x'.join(map(str, cc.mpigrid)),
@@ -415,7 +424,10 @@ def test_command_line_driver():
         with quiet() as out:
             main(argv)
         if cc.rank == 0:
-            assert 'MONTE CARLO' in out.getvalue() and not any(f.endswith('.png') for f in os.listdir('.'))   # the run plots nothing
+            shown = out.getvalue()
+            assert '\u256d\u2500 system' in shown and 'step=' in shown and '\u256d\u2500 done' in shown     # boxes, log lines, summary
+            assert 'MONTE CARLO' not in shown                                                   # no progress bar unless asked for
+            assert os.path.isfile('run.log') and not any(f.endswith('.png') for f in os.listdir('.'))   # the run plots nothing
             records = json.load(open('meas.json'))['measurements']                              # written as the run went on
             assert [r['sweep'] for r in records] == [0, 1, 2, 3, 4] and set(records[1]) == {'sweep', 'm', 'e', 'acceptance'}
             assert records[0]['acceptance'] is None and all(0 <= r['acceptance'] <= 1 for r in records[1:])
@@ -465,11 +477,34 @@ def test_restart_gives_back_the_saved_configuration_and_logs_the_structure():
         new.load(path, log=lines.append)
         assert np.array_equal(to_global(cc, loc, new.value), glob)
         text = '\n'.join(lines)
-        for needle in ('type=LatticeReal', 'grid=8x4', "dataset 'value' shape=(32,)", 'float32',
+        for needle in ('type=LatticeReal', 'grid=8x4', "dataset 'value' shape=(32,)", 'int8',
                        'IsingField', 'matches', 'loaded (32 sites)', '+1 or -1'):
             assert needle in text, needle
         model = IsingModel(field=new, logger=None, beta=0.5)           # a model on the loaded field
         assert np.isclose(model.magnetization(), glob.mean())
+
+
+@needs_hdf5
+def test_the_spins_are_one_byte_on_disk_and_a_float_checkpoint_of_spins_still_restarts():
+    import h5py
+    from pylattice.core.hdf5io import Writer
+    glob = random_config((8, 4), 21)
+    cc, loc, field, _ = make(glob)
+    assert field.value.dtype == np.int8
+    with _shared_tempdir() as d:
+        path, old = os.path.join(d, 'new.hdf5'), os.path.join(d, 'old.hdf5')
+        Writer(lattice=field, cartesiancomm=cc).write(path)
+        floats = LatticeReal(grid=loc, cartesiancomm=cc)                   # a checkpoint of an older version: +1.0 / -1.0
+        floats.value = field.value.astype(np.float32)
+        Writer(lattice=floats, cartesiancomm=cc).write(old)
+        cc.comm.Barrier()
+        with h5py.File(path, 'r') as f:
+            assert f['value'].dtype == np.int8
+        for file, word in ((path, 'int8'), (old, 'converted')):
+            new, lines = IsingField(grid=loc, cartesiancomm=cc), []
+            new.load(file, log=lines.append)
+            assert new.value.dtype == np.int8 and np.array_equal(to_global(cc, loc, new.value), glob)
+            assert word in '\n'.join(lines)
 
 
 @needs_hdf5
@@ -483,17 +518,22 @@ def test_restart_refuses_a_file_that_does_not_match_the_field():
         other = IsingField(grid=loc2, cartesiancomm=cc2, initialization='cold')
         with pytest.raises(ValueError, match='global grid on disk is 8x4, the field has 4x8'):
             other.load(path)
-        assert np.all(other.value == -1)                               # untouched
+        assert np.all(other.value == 1)                                # untouched: still the cold start
         vec = LatticeVectorReal(grid=loc, cartesiancomm=cc, Nd=2)       # another kind of field
         with pytest.raises(ValueError, match='type on disk is LatticeReal'):
             from pylattice.core.hdf5io import load_into
             load_into(vec, path)
         notspins = LatticeReal(grid=loc, cartesiancomm=cc)
-        notspins.value[:] = 0.5
+        notspins.value[:] = 2.0                                        # whole numbers, but not +1 or -1
         Writer(lattice=notspins, cartesiancomm=cc).write(os.path.join(d, 'x.hdf5'))
         with pytest.raises(ValueError, match='not an Ising configuration'):
             field.load(os.path.join(d, 'x.hdf5'))
-        assert set(np.unique(field.value)) <= {-1.0, 1.0}              # the spins are back as they were
+        assert set(np.unique(field.value)) <= {-1, 1}                  # the spins are back as they were
+        notspins.value[:] = 0.5                                        # not even integers
+        Writer(lattice=notspins, cartesiancomm=cc).write(os.path.join(d, 'y.hdf5'))
+        with pytest.raises(ValueError, match='not whole numbers'):
+            field.load(os.path.join(d, 'y.hdf5'))
+        assert set(np.unique(field.value)) <= {-1, 1}
         with pytest.raises(OSError, match='cannot read'):
             field.load(os.path.join(d, 'missing.hdf5'))
 
@@ -505,7 +545,7 @@ def test_restart_continues_the_run_exactly_with_the_random_state():
 
     def start(seed):
         rng = cc.rng(seed)
-        field = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=rng)
+        field = IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=rng)
         return field, IsingModel(field=field, logger=None, beta=0.4, rng=rng), rng
 
     with _shared_tempdir() as d:
@@ -534,7 +574,7 @@ def test_restart_random_state_warns_when_it_cannot_be_restored():
     from pylattice.core.hdf5io import Writer, restore_rng
     cc, loc = setup([8, 4])
     rng = cc.rng(1)
-    field = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=rng)
+    field = IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=rng)
     model = IsingModel(field=field, logger=None, beta=0.4, rng=rng)
     with _shared_tempdir() as d:
         path = Checkpointer(1, directory=d, prefix='c').save(model, 1)
@@ -561,16 +601,15 @@ def test_start_from_must_be_an_existing_file():
 def test_the_spins_are_elements_of_z2_and_a_flip_is_the_product_with_its_generator():
     from pylattice.core.groups.discrete import Z2
     cc, loc = setup([8, 4])
-    for init in ('hot', 'cold', 'random'):
+    for init in ('hot', 'cold'):
         field = IsingField(grid=loc, cartesiancomm=cc, initialization=init, seed=cc.rng(3))
-        assert Z2.contains(field.value).all() and field.value.dtype == np.float32
-    assert (IsingField(grid=loc, cartesiancomm=cc, initialization='hot').value == Z2.identity_element).all()
-    assert (IsingField(grid=loc, cartesiancomm=cc, initialization='cold').value == Z2.generator).all()
-    a = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=cc.rng(4)).value
-    assert np.array_equal(a, Z2.random(cc.rng(4), a.shape).astype(np.float32))      # the stream of Z2.random
+        assert Z2.contains(field.value).all() and field.value.dtype == np.int8
+    assert (IsingField(grid=loc, cartesiancomm=cc, initialization='cold').value == Z2.identity_element).all()   # cold: the identity
+    a = IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=cc.rng(4)).value
+    assert np.array_equal(a, Z2.random(cc.rng(4), a.shape))      # the stream of Z2.random
     counts = cc.comm.allreduce((int((a == 1).sum()), int((a == -1).sum())))        # both values occur, over all the ranks
     assert counts[0] > 0 and counts[1] > 0
-    model = IsingModel(field=IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=cc.rng(5)),
+    model = IsingModel(field=IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=cc.rng(5)),
                        logger=None, beta=0.0, rng=cc.rng(6))                             # beta 0: every flip is accepted
     before = model.field.value.copy()
     model.sweep()

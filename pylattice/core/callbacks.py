@@ -16,6 +16,9 @@ import time
 import numpy as np
 import psutil
 from mpi4py import MPI
+from rich.text import Text
+
+from pylattice.core.parallel import allsum
 
 
 def _check_every(every):
@@ -132,18 +135,20 @@ class RunLog:
                   over the ranks: 100 = one core fully used (more with threads), near 0 when it waits
     steps_per_s   sweeps per second of wall time since the previous line
 
-    The file is appended to (mode='w' starts it afresh) and flushed at every line.
+    The file is appended to (mode='w' starts it afresh) and flushed at every line. With logger (a
+    pylattice.core.cli.Logger) there is no file of its own: the lines go through logger.show, in color on the
+    terminal and as plain text in the log file of the logger, among the other messages of the run.
     """
 
-    def __init__(self, every, filename='run.log', mode='a'):
+    def __init__(self, every, filename='run.log', mode='a', logger=None):
         self.every = _check_every(every)
-        self.filename, self.mode = filename, mode
+        self.filename, self.mode, self.logger = filename, mode, logger
         self.file = None
 
     def start(self, model):
         self.comm = getattr(model, 'comm', MPI.COMM_WORLD)
         self.process = psutil.Process()
-        if self.comm.Get_rank() == 0:
+        if self.comm.Get_rank() == 0 and self.logger is None:
             self.file = open(self.filename, self.mode)
         self.last_step = 0
         self.last_time = time.perf_counter()
@@ -155,17 +160,20 @@ class RunLog:
         now, cpu_now = time.perf_counter(), time.process_time()
         elapsed = max(now - self.last_time, 1e-9)
         values = observables()                               # these three are collective calls
-        memory = self.comm.allreduce(self.process.memory_info().rss)
+        memory = allsum(self.comm, self.process.memory_info().rss)
         # the cpu time of this process against the wall time: it does not depend on the counters of the
         # system, whose ticks are too coarse for the short interval between two lines
-        cpu = self.comm.allreduce(100.0 * (cpu_now - self.last_cpu) / elapsed) / self.comm.Get_size()
+        cpu = allsum(self.comm, 100.0 * (cpu_now - self.last_cpu) / elapsed) / self.comm.Get_size()
         if self.comm.Get_rank() == 0:
             speed = (step - self.last_step) / elapsed
-            line = 'step={}'.format(step)
-            line += ''.join(' {}={:.6g}'.format(name, value) for name, value in values.items())
-            line += ' mem_MB={:.1f} cpu_pct={:.1f} steps_per_s={:.2f}'.format(memory / 2 ** 20, cpu, speed)
-            self.file.write(line + '\n')
-            self.file.flush()
+            fields = [('step', str(step))] + [(name, '{:.6g}'.format(value)) for name, value in values.items()]
+            fields += [('mem_MB', '{:.1f}'.format(memory / 2 ** 20)), ('cpu_pct', '{:.1f}'.format(cpu)),
+                       ('steps_per_s', '{:.2f}'.format(speed))]
+            if self.logger is not None:
+                self.logger.show(Text(' ').join(Text.assemble((k + '=', 'dim'), (v, 'bold')) for k, v in fields))
+            else:
+                self.file.write(' '.join('{}={}'.format(k, v) for k, v in fields) + '\n')
+                self.file.flush()
         self.last_step = step
         self.last_time = time.perf_counter()               # the time spent here is not counted in the speed
         self.last_cpu = time.process_time()

@@ -26,6 +26,69 @@ def field(rng=None, grid=GRID, nd=ND):
     return SU2Field(grid=grid, cartesiancomm=CartesianComm(mpigrid=[1] * len(grid)), Nd=nd, rng=rng)
 
 
+def link_plaquette_trace(A, mu=0, nu=1):
+    """Re tr of U_mu(x) U_nu(x+mu) U_mu(x+nu)^dagger U_nu(x)^dagger, built with the field's own shifts"""
+    Umu, Unu = A.peek_index(mu), A.peek_index(nu)
+    P = Umu * Unu.shift_forward(mu) * Umu.shift_forward(nu).adj() * Unu.adj()      # built with the lattice operations
+    return P.trace().value.real
+
+
+def test_gauge_transform_returns_a_new_su2_field_and_keeps_the_original():
+    A = field(np.random.default_rng(3)); A.random_config()
+    before = A.value.copy()
+    B = A.gauge_transform()
+    assert B is not A and isinstance(B, SU2Field) and np.array_equal(A.value, before)
+    assert_su2(B.value) and not np.allclose(B.value, A.value)
+
+
+def test_gauge_transform_follows_the_definition_on_every_link():
+    A = field(np.random.default_rng(4)); A.random_config()
+    g = A.random_gauge_transformation()
+    B = A.gauge_transform(g)
+    grid = np.array(GRID)
+    for site in range(SITES):
+        x = np.unravel_index(site, GRID)
+        for mu in range(ND):
+            y = list(x); y[mu] = (y[mu] + 1) % grid[mu]
+            ysite = np.ravel_multi_index(y, GRID)
+            expected = g[site] @ A.value[site, mu] @ dagger(g[ysite])
+            assert np.abs(B.value[site, mu] - expected).max() < 1e-12
+
+
+def test_gauge_transform_leaves_the_plaquette_invariant_but_not_the_links():
+    A = field(np.random.default_rng(5)); A.random_config()
+    B = A.gauge_transform()
+    for mu, nu in ((0, 1), (1, 0)):
+        assert np.abs(link_plaquette_trace(A, mu, nu) - link_plaquette_trace(B, mu, nu)).max() < 1e-12
+    assert np.abs(np.trace(A.value, axis1=-2, axis2=-1) - np.trace(B.value, axis1=-2, axis2=-1)).max() > 1e-3
+
+
+def test_gauge_transform_with_identity_or_a_constant_g():
+    A = field(np.random.default_rng(6)); A.random_config()
+    ident = np.broadcast_to(I2, (SITES, 2, 2))
+    assert np.abs(A.gauge_transform(ident).value - A.value).max() < 1e-14
+    h = sun.to_matrix(sun.random_quaternion(np.random.default_rng(7)))
+    B = A.gauge_transform(np.broadcast_to(h, (SITES, 2, 2)))                     # global: a conjugation
+    assert np.abs(B.value - h @ A.value @ dagger(h)).max() < 1e-12
+
+
+def test_gauge_transform_inverse_and_composition_and_cold_field():
+    A = field(np.random.default_rng(8)); A.random_config()
+    g, h = A.random_gauge_transformation(), A.random_gauge_transformation()
+    assert np.abs(A.gauge_transform(g).gauge_transform(dagger(g)).value - A.value).max() < 1e-12
+    assert np.abs(A.gauge_transform(g).gauge_transform(h).value - A.gauge_transform(h @ g).value).max() < 1e-12
+    C = field()                                                                  # cold: U' = g(x) g(x+mu)^dagger
+    assert_su2(C.gauge_transform(g).value)
+
+
+def test_gauge_transform_rejects_a_wrong_shape_and_is_reproducible_with_a_seed():
+    A = field(np.random.default_rng(9)); A.random_config()
+    with pytest.raises(ValueError):
+        A.gauge_transform(np.zeros((SITES, 3, 3)))
+    assert np.array_equal(A.gauge_transform(rng=np.random.default_rng(1)).value,
+                          A.gauge_transform(rng=np.random.default_rng(1)).value)
+
+
 def test_shape_dtype_and_cold_start():
     A = field()
     assert A.value.shape == (SITES, ND, 2, 2) and A.value.dtype == np.complex128
@@ -178,11 +241,64 @@ def test_the_lattice_shifts_keep_the_links_in_su2():
     assert np.abs(A.value - before).max() < 1e-12                                # forward then backward is the identity
 
 
-def test_staple_plaquette_and_action_are_not_written_yet():
-    A = field()
-    for method in (A.Staple, A.Plaq, A.Action):
-        with pytest.raises(NotImplementedError):
-            method()
+def brute_plaquette(A, mu, nu, site):
+    G = tuple(int(g) for g in A.grid)
+    x = np.unravel_index(site, G)
+    idx = lambda d, k=1: np.ravel_multi_index([(x[i] + (k if i == d else 0)) % G[i] for i in range(len(G))], G)
+    U = A.value
+    return U[site, mu] @ U[idx(mu), nu] @ dagger(U[idx(nu), mu]) @ dagger(U[site, nu])
+
+
+def test_cold_field_has_plaquette_one_and_action_zero():
+    A = field(nd=3, grid=[4, 4, 4])
+    assert abs(A.Plaq() - 1) < 1e-14 and abs(A.Action(2.3)) < 1e-12 and isinstance(A.Plaq(), complex)
+    assert np.abs(A.Staple(1).value - 4 * I2).max() < 1e-14                              # 2 (Nd-1) staples, each the identity
+
+
+def test_plaquette_field_matches_a_site_by_site_product():
+    A = field(np.random.default_rng(11)); A.random_config()
+    P = A.Plaquette_field(0, 1).value
+    for site in range(SITES):
+        assert np.abs(P[site] - brute_plaquette(A, 0, 1, site)).max() < 1e-12
+    assert_su2(P)
+
+
+def test_plaq_and_action_follow_their_definition_in_3d():
+    A = field(np.random.default_rng(12), grid=[3, 4, 5], nd=3); A.random_config()
+    n = 3 * 4 * 5
+    vals = [0.5 * np.trace(brute_plaquette(A, mu, nu, s)).real for mu in range(3) for nu in range(mu + 1, 3) for s in range(n)]
+    assert abs(A.Plaq() - np.mean(vals)) < 1e-12 and len(vals) == 3 * n and abs(A.Plaq().imag) < 1e-12
+    assert abs(A.Action(2.0) - 2.0 * (len(vals) - sum(vals))) < 1e-10
+    assert -1 <= A.Plaq().real <= 1 and A.Action(2.0) >= 0
+
+
+def test_staple_contracted_with_the_links_gives_four_times_the_plaquettes():
+    A = field(np.random.default_rng(13), grid=[4, 4, 4], nd=3); A.random_config()
+    link_sum = sum(np.trace(A.value[:, mu] @ A.Staple(mu).value, axis1=-2, axis2=-1).real.sum() for mu in range(3))
+    plaq_sum = sum(np.trace(A.Plaquette_field(mu, nu).value, axis1=-2, axis2=-1).real.sum() for mu in range(3) for nu in range(mu + 1, 3))
+    assert abs(link_sum - 4 * plaq_sum) < 1e-9
+
+
+def test_staple_is_a_sum_of_su2_products_and_checks_the_direction():
+    A = field(np.random.default_rng(14)); A.random_config()
+    S = A.Staple(0).value                                                                 # Nd=2: 2 staples, each in SU(2)
+    assert S.shape == (SITES, 2, 2) and np.linalg.norm(S, axis=(-2, -1)).max() <= 2 * np.sqrt(2) + 1e-12
+    with pytest.raises(ValueError):
+        A.Staple(2)
+    with pytest.raises(ValueError):
+        A.Plaquette_field(1, 1)
+    with pytest.raises(ValueError):
+        field(nd=1).Plaq()
+
+
+def test_plaq_action_and_staple_energy_are_gauge_invariant():
+    A = field(np.random.default_rng(15), grid=[4, 4, 4], nd=3); A.random_config()
+    B = A.gauge_transform()
+    assert abs(A.Plaq() - B.Plaq()) < 1e-12 and abs(A.Action(2.2) - B.Action(2.2)) < 1e-9
+    for mu in range(3):                                                             # the staple itself is covariant: S' = g(x+mu...)
+        ea = np.trace(A.value[:, mu] @ A.Staple(mu).value, axis1=-2, axis2=-1).real
+        eb = np.trace(B.value[:, mu] @ B.Staple(mu).value, axis1=-2, axis2=-1).real
+        assert np.abs(ea - eb).max() < 1e-12
 
 
 def parallel_hdf5():

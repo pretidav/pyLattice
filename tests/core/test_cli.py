@@ -24,11 +24,12 @@ def test_defaults():
     P = Parser([])
     assert P.grid == [4, 4] and P.mpigrid == [1, 2]
     assert P.steps == 100 and P.beta == 0.5 and P.seed == 0
-    assert P.debug is False and P.logfile is False
+    assert P.debug is False and P.logfile == 'run.log' and P.progress is False
     assert type(P.steps) is int and type(P.beta) is float and type(P.seed) is int
-    assert P.checkpoint_every == 0 and P.runlog_every == 0                  # both off by default
+    assert P.checkpoint_every == 0 and P.runlog_every == 5                  # checkpoints off; about 20 log lines per run
     assert P.args == {'grid': [4, 4], 'mpigrid': [1, 2], 'steps': 100, 'beta': 0.5, 'seed': 0,
-                      'checkpoint_every': 0, 'runlog_every': 0, 'start_from': None, 'debug': False, 'logfile': False}
+                      'checkpoint_every': 0, 'runlog_every': 5, 'start_from': None, 'debug': False, 'logfile': 'run.log',
+                      'progress': False}
 
 
 def test_readme_command_line():
@@ -38,12 +39,12 @@ def test_readme_command_line():
 
 def test_all_options_and_both_syntaxes():
     P = Parser(['--grid', '8x8x8x4', '--mpigrid', '1x1x2x2', '--steps', '5', '--beta', '-0.25',
-                '--seed', '42', '--debug', '--logfile'])
+                '--seed', '42', '--debug', '--logfile', 'my.log', '--progress'])
     assert P.grid == [8, 8, 8, 4] and P.mpigrid == [1, 1, 2, 2]
-    assert P.steps == 5 and P.beta == -0.25 and P.seed == 42 and P.debug and P.logfile
+    assert P.steps == 5 and P.beta == -0.25 and P.seed == 42 and P.debug and P.logfile == 'my.log' and P.progress
     Q = Parser(['--grid=8x8x8x4', '--mpigrid=1x1x2x2', '--steps=5', '--beta=-0.25', '--seed=42'])
     assert (Q.grid, Q.mpigrid, Q.steps, Q.beta, Q.seed) == (P.grid, P.mpigrid, P.steps, P.beta, P.seed)
-    assert not Q.debug and not Q.logfile
+    assert not Q.debug and Q.logfile == 'run.log' and not Q.progress
 
 
 def test_one_dimensional_and_boundary_values():
@@ -80,6 +81,13 @@ def test_invalid_values_give_a_clean_error(argv, option, capsys):
     assert option in err and 'Traceback' not in err
 
 
+def test_the_run_log_interval_defaults_to_about_twenty_lines_and_the_logfile_can_be_switched_off():
+    assert Parser(['--steps=2000']).runlog_every == 100 and Parser(['--steps=7']).runlog_every == 1
+    assert Parser(['--steps=0']).runlog_every == 0 and Parser(['--steps=2000', '--runlog-every=0']).runlog_every == 0
+    assert Parser(['--logfile=off']).logfile is None and Parser(['--logfile=OFF']).logfile is None
+    assert Parser(['--logfile=a/b.log']).logfile == 'a/b.log'
+
+
 def test_checkpoint_and_runlog_options():
     P = Parser(['--checkpoint-every=500', '--runlog-every', '10'])
     assert (P.checkpoint_every, P.runlog_every) == (500, 10)
@@ -109,7 +117,7 @@ def test_help_describes_every_option(capsys):
         Parser(['--help'])
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    for option in ('--grid', '--mpigrid', '--steps', '--beta', '--seed', '--debug', '--logfile',
+    for option in ('--grid', '--mpigrid', '--steps', '--beta', '--seed', '--debug', '--logfile', '--progress',
                    '--checkpoint-every', '--runlog-every'):
         assert option in out
     assert 'XxYxZx' not in out                           # the old copy-pasted help texts are gone
@@ -258,7 +266,7 @@ def test_logfile_default_name_and_no_file_without_the_flag(tmp_path, monkeypatch
     log.info('x')
     for h in log.handlers:
         h.flush()
-    assert os.listdir(str(tmp_path)) == ['pylattice.log']
+    assert os.listdir(str(tmp_path)) == ['run.log']
 
 
 def test_logfile_filtered_like_the_console(tmp_path):
@@ -310,18 +318,50 @@ def test_brackets_in_messages_are_not_rich_markup():
 
 
 # ------------------------------------------------------------------ logo and run information
-def test_banner_has_the_logo_and_the_run_and_system_information(tmp_path):
-    import logging
-    from pylattice.core.cli import LOGO, log_banner, run_info
+def test_banner_has_the_logo_and_a_box_for_each_section_on_the_terminal_and_in_the_file(tmp_path):
+    from pylattice.core.cli import LOGO, run_info
     p = Parser(['--grid=4x6', '--mpigrid=1x1', '--beta=0.7', '--steps=33', '--seed=5'])
-    lg = Logger(debug=False, logfile=True, filename=str(tmp_path / 'run.log'), rank=0, size=1)
-    log_banner(lg.log, p)
+    c = console()
+    lg = Logger(debug=False, logfile=True, filename=str(tmp_path / 'run.log'), console=c, rank=0, size=1)
+    lg.banner(p)
     for h in lg.log.handlers:
         h.flush()
-    text = (tmp_path / 'run.log').read_text()
-    assert 'pyLattice' in text and LOGO.splitlines()[2].rstrip() in text
-    for needle in ('os ', 'architecture', 'mpi ranks', 'python', 'numpy', 'h5py', 'local grid',
-                   '4x6', 'global lattice', '24 sites', '0.7', '33', 'seed'):
-        assert needle in text, needle
+    on_file = (tmp_path / 'run.log').read_text(encoding='utf-8')
+    for shown in (on_file, text(c)):
+        assert 'pyLattice' in shown and LOGO.splitlines()[2].rstrip() in shown
+        for title in ('system', 'parallel', 'lattice', 'run'):
+            assert '\u256d\u2500 {} \u2500'.format(title) in shown, title                    # a box with its title
+        for needle in ('os ', 'architecture', 'mpi ranks', 'python', 'numpy', 'h5py', 'local grid',
+                       '4x6', 'global lattice', '24 sites', '0.7', '33', 'seed', 'run.log'):
+            assert needle in shown, needle
+        tops = [l for l in shown.splitlines() if l.startswith('\u256d')]
+        bottoms = [l for l in shown.splitlines() if l.startswith('\u2570')]
+        assert len(tops) == len(bottoms) == 4 and len({len(l) for l in tops + bottoms}) == 1      # equal boxes
+    assert '\x1b[' not in on_file and '\x1b[' in raw(c)                                         # color on the terminal only
     sections = dict(run_info(p))
     assert dict(sections['lattice'])['global lattice'].startswith('4x6')
+    assert dict(sections['run'])['log file'] == 'run.log' and dict(sections['run'])['run log every'] == 1
+
+
+def test_show_prints_in_color_on_the_terminal_and_in_plain_text_in_the_file_and_only_on_rank_zero(tmp_path):
+    from rich.text import Text
+    c0, c1 = console(), console()
+    path = str(tmp_path / 'run.log')
+    lg = Logger(debug=False, logfile=True, filename=path, console=c0, rank=0, size=2)
+    lg.show(Text.assemble(('step=', 'dim'), ('10', 'bold')))
+    lg.log.info('a message')
+    Logger(debug=False, logfile=True, filename=str(tmp_path / 'r1.log'), console=c1, rank=1, size=2).show(Text('silent'))
+    content = open(path, encoding='utf-8').read()
+    assert content.splitlines()[0] == 'step=10' and 'a message' in content and '\x1b[' not in content   # one line, plain
+    assert 'step=10' in text(c0) and '\x1b[' in raw(c0)
+    assert text(c1) == '' and 'silent' not in open(str(tmp_path / 'r1.log'), encoding='utf-8').read()
+
+
+def test_the_log_file_is_appended_to_and_long_lines_are_not_wrapped(tmp_path):
+    from rich.text import Text
+    path = str(tmp_path / 'run.log')
+    for k in range(2):
+        lg = Logger(debug=False, logfile=True, filename=path, console=console(), rank=0, size=1)
+        lg.show(Text('x' * 300 + str(k)))
+    lines = open(path, encoding='utf-8').read().splitlines()
+    assert [len(l) for l in lines] == [301, 301]

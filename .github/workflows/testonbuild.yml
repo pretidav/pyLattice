@@ -22,6 +22,8 @@ jobs:
           pip install -r requirements.txt
       - name: Run test tensors
         run:  pytest tests/core/test_tensors.py
+      - name: Run test vectorized lattice arithmetic
+        run:  pytest tests/core/test_grid_vectorized.py
       - name: Run test input arguments and logs
         run:  pytest tests/core/test_cli.py
       - name: Run test Lattice
@@ -34,6 +36,8 @@ jobs:
         run:  pytest tests/core/test_discrete.py tests/core/test_su2.py tests/core/test_su.py tests/core/test_group_interface.py
       - name: Run test SU(2) gauge field
         run:  pytest tests/theories/gauge/test_gauge_sun.py
+      - name: Run test SU(2) gauge field in parallel
+        run:  mpiexec -n 2 python tests/theories/gauge/test_gauge_sun_mpi.py
       - name: Run test random streams
         run:  pytest tests/core/test_rng.py
       - name: Run test random streams in parallel
@@ -42,6 +46,8 @@ jobs:
         run:  pytest tests/core/test_stats.py
       - name: Run test Monte Carlo driver
         run:  pytest tests/core/test_montecarlo.py
+      - name: Run test of the command line run
+        run:  pytest tests/core/test_driver.py
       - name: Run test Monte Carlo driver in parallel
         run:  mpiexec -n 2 python tests/core/test_montecarlo.py
       - name: Run test callbacks (checkpoints and run log)

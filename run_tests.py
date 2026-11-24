@@ -37,10 +37,10 @@ COLOR = {'PASS': 'green', 'FAIL': 'red', 'SKIP': 'yellow'}
 # ---------------------------------------------------------------------------------------------- the steps
 # pytest on one process: every file that pytest collects and runs by itself
 PYTEST_FILES = [
-    'tests/core/test_tensors.py', 'tests/core/test_cli.py',
+    'tests/core/test_tensors.py', 'tests/core/test_grid_vectorized.py', 'tests/core/test_cli.py',
     'tests/core/test_discrete.py', 'tests/core/test_su2.py', 'tests/core/test_su.py',
     'tests/core/test_group_interface.py', 'tests/theories/gauge/test_gauge_sun.py',
-    'tests/core/test_rng.py', 'tests/core/test_stats.py', 'tests/core/test_montecarlo.py',
+    'tests/core/test_rng.py', 'tests/core/test_stats.py', 'tests/core/test_montecarlo.py', 'tests/core/test_driver.py',
     'tests/core/test_callbacks.py', 'tests/theories/spin/test_ising.py',
     'tests/theories/spin/test_ising_meas.py', 'tests/utils/test_plot_meas.py', 'tests/utils/test_run_tests.py',
 ]
@@ -48,6 +48,7 @@ PYTEST_FILES = [
 SCRIPT_FILES = ['tests/core/test_grid.py', 'tests/core/test_grid_eo.py']
 # MPI scripts: file -> (ranks of the standard routine, further ranks of --full)
 MPI_FILES = {
+    'tests/theories/gauge/test_gauge_sun_mpi.py': ((2,), ()),   # its rank grids are written for exactly 2 ranks
     'tests/core/test_grid_mpi.py': ((2,), ()),                  # its rank grids are written for exactly 2 ranks
     'tests/core/test_rng.py': ((2,), (1, 4)),
     'tests/core/test_montecarlo.py': ((2,), (1, 4)),

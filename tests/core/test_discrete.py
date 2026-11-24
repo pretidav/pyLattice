@@ -15,7 +15,7 @@ ids = [g.name for g in GROUPS]
 
 def test_z2_is_plus_and_minus_one_as_real_numbers():
     assert isinstance(Z2, DiscreteGroup) and Z2.name == 'Z2' and Z2.order == 2
-    assert list(Z2.elements) == [1.0, -1.0] and Z2.elements.dtype == float
+    assert list(Z2.elements) == [1, -1] and Z2.elements.dtype == np.int8
     assert Z2.identity_element == 1.0 and Z2.generator == -1.0
     assert Z2.multiply(-1.0, -1.0) == 1.0 and Z2.multiply(-1.0, 1.0) == -1.0
     assert Z2.inverse(-1.0) == -1.0 and np.array_equal(Z2.multiply(np.array([1.0, -1, -1]), np.array([-1.0, -1, 1])), [-1, 1, -1])

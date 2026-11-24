@@ -7,7 +7,9 @@ process or on several ranks:
 """
 import contextlib
 import json
+import logging
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -110,6 +112,34 @@ def test_runlog_one_line_per_log_step_with_the_requested_fields():
             assert 0.7 * everyone < float(values['mem_MB']) < 1.3 * everyone     # the memory of all the ranks, not of one
             assert 0.0 <= float(values['cpu_pct']) <= 400.0              # a few sweeps of nothing: about one core, never 1699
             assert float(values['steps_per_s']) > 0
+
+
+def test_runlog_through_a_logger_writes_the_same_line_to_the_terminal_and_the_log_file_and_no_file_of_its_own():
+    import io
+    from rich.console import Console
+    from pylattice.core.cli import Logger
+    with tempfile.TemporaryDirectory() as d:                                        # one per rank: only rank 0 writes
+        cwd = os.getcwd()
+        os.chdir(d)
+        try:
+            term = Console(file=io.StringIO(), force_terminal=True, color_system='standard', width=120)
+            lg = Logger(debug=False, logfile=True, filename='all.log', console=term, rank=RANK, size=SIZE)
+            montecarlo.run(Toy(), steps=4, progress=False, callbacks=[RunLog(2, logger=lg)])
+            for h in lg.log.handlers:
+                h.flush()
+            if RANK == 0:
+                on_file = [l for l in open('all.log', encoding='utf-8').read().splitlines() if l.startswith('step=')]
+                plain = re.sub(r'\x1b\[[0-9;]*m', '', term.file.getvalue())
+                on_terminal = [l for l in plain.splitlines() if l.startswith('step=')]
+                assert len(on_file) == 2 and on_file == on_terminal and '\x1b[' in term.file.getvalue()
+                assert [item.split('=')[0] for item in on_file[0].split()] == ['step', 'x', 'y', 'mem_MB', 'cpu_pct', 'steps_per_s']
+                assert os.listdir('.') == ['all.log']                                  # no run.log of the callback itself
+            else:
+                assert term.file.getvalue() == ''
+        finally:
+            os.chdir(cwd)
+            for handler in list(logging.getLogger('pylattice').handlers):
+                logging.getLogger('pylattice').removeHandler(handler)
 
 
 def test_runlog_observable_format():
@@ -361,7 +391,7 @@ def test_measurement_file_is_written_by_rank_zero_and_overwritten_by_the_next_ru
 def test_measurement_file_holds_the_history_of_a_real_run():
     from pylattice.theories.spin.ising import IsingField, IsingModel
     cc = CartesianComm(mpigrid={1: [1, 1], 2: [2, 1], 4: [2, 2]}[SIZE])
-    model = IsingModel(field=IsingField(grid=[4, 4], cartesiancomm=cc, initialization='random', seed=cc.rng(5)),
+    model = IsingModel(field=IsingField(grid=[4, 4], cartesiancomm=cc, initialization='hot', seed=cc.rng(5)),
                        logger=None, beta=0.4, rng=cc.rng(5))
     with shared_tempdir() as d:
         path = os.path.join(d, 'meas.json')
@@ -473,7 +503,7 @@ def test_a_model_field_that_is_a_subclass_is_saved_as_its_lattice():
     from pylattice.core.hdf5io import Reader
     from pylattice.theories.spin.ising import IsingField, IsingModel
     cc = CartesianComm(mpigrid={1: [1, 1], 2: [2, 1], 4: [2, 2]}[SIZE])
-    model = IsingModel(field=IsingField(grid=[4, 4], cartesiancomm=cc, initialization='random', seed=cc.rng(7)),
+    model = IsingModel(field=IsingField(grid=[4, 4], cartesiancomm=cc, initialization='hot', seed=cc.rng(7)),
                        logger=None, beta=0.5)
     with shared_tempdir() as d:
         model.run_mc(steps=6, progress=False, callbacks=[Checkpointer(3, directory=d, prefix='t', final=True),

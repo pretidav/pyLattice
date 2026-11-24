@@ -103,7 +103,7 @@ def test_the_observables_of_known_configurations_and_the_order_of_the_steps():
 def test_offline_measurements_equal_the_ones_made_during_the_run():
     cc, loc = setup([8, 4])
     rng = cc.rng(7)
-    field = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=rng)
+    field = IsingField(grid=loc, cartesiancomm=cc, initialization='hot', seed=rng)
     model = IsingModel(field=field, logger=None, beta=0.4, rng=rng)
     with shared_tempdir() as d:
         online = os.path.join(d, 'online.json')
@@ -127,7 +127,7 @@ def test_a_file_that_is_not_an_ising_configuration_stops_the_run_and_keeps_what_
     with shared_tempdir() as d:
         p1 = Checkpointer(1, directory=d, prefix='c').save(good, 1)
         notspins = LatticeReal(grid=loc, cartesiancomm=cc)
-        notspins.value[:] = 0.5
+        notspins.value[:] = 2.0
         p2 = os.path.join(d, 'bad.hdf5')
         Writer(lattice=notspins, cartesiancomm=cc).write(p2)
         out = os.path.join(d, 'meas.json')

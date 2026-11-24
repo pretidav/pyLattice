@@ -84,15 +84,20 @@ the system and of the run (OS, architecture, MPI, `h5py`, lattice, parameters), 
 | `--beta B` | `0.5` | inverse temperature |
 | `--seed S` | `0` | seed; every rank draws from its own independent stream of `S` |
 | `--checkpoint-every N` | `0` (off) | save the configuration every N sweeps, and at the end |
-| `--runlog-every N` | `0` (off) | write a line of diagnostics to `run.log` every N sweeps |
+| `--runlog-every N` | about 20 lines per run | log a line of diagnostics every N sweeps, on the terminal and in the log file (`0`: none) |
 | `--start-from FILE.hdf5` | none | start from a saved configuration instead of a random one |
 | `--debug` | off | log at DEBUG level, from every rank |
-| `--logfile` | off | also write the log to `pylattice.log` |
+| `--logfile FILE` | `run.log` | the log file, appended to if it exists (`off`: no file) |
+| `--progress` | off | also draw a progress bar |
 
 ~~~
 mpiexec -np 4 python -m pylattice.theories.spin.ising --grid=20x20 --mpigrid=2x2 --beta=1.5 --steps=2000 \
     --checkpoint-every=500 --runlog-every=100
 ~~~
+
+The terminal shows the logo, a colored box for each section of the system and run information (system, parallel,
+lattice, run), one line per `--runlog-every` sweeps, and a closing summary box. The log file holds the same, in plain
+text.
 
 ### What a run writes
 
@@ -100,10 +105,9 @@ mpiexec -np 4 python -m pylattice.theories.spin.ising --grid=20x20 --mpigrid=2x2
 |---|---|---|
 | `meas.json` | always | every measurement, flushed as soon as it is made (see below) |
 | `checkpoints/ising_<sweep>.hdf5` | `--checkpoint-every` | configuration (parallel HDF5) and the random state of every rank |
-| `run.log` | `--runlog-every` | `step=100 m=0.12 e=-1.91 mem_MB=312.4 cpu_pct=98.7 steps_per_s=211.30` |
-| `pylattice.log` | `--logfile` | the log: logo, system and run summary, messages |
+| `run.log` | always (`--logfile`) | the log: logo, boxes with the system and run information, messages, one line per interval (below) and the summary |
 
-- `run.log` has one line per interval: the sweep (thermalization included), the observables, the resident memory of
+- The line per interval, e.g. `step=100 m=0.12 e=-1.91 mem_MB=312.4 cpu_pct=98.7 steps_per_s=211.30`, has the sweep (thermalization included), the observables, the resident memory of
   all the ranks together, the mean cpu use per rank (100 = one core fully busy) and the sweeps per second.
 - `meas.json` is valid JSON at every moment, so it can be read while the run goes on and it survives a job that
   dies. An existing one is overwritten.
@@ -133,7 +137,7 @@ filled, and the run stops with a message if they differ (wrong type, wrong latti
 - Checkpoints hold the random state of every rank. On the **same rank layout** the restarted run continues exactly,
   bit for bit, as if it had not stopped. On another layout the configuration is loaded but the random numbers
   start afresh (the log warns).
-- Checkpoints keep the precision of the field (single for the Ising spins, double for SU(2) links): nothing is
+- Checkpoints keep the precision of the field (int8 for the Ising spins, one byte each; double for SU(2) links and every other lattice by default): nothing is
   rounded on the way to the disk.
 - The sweep counter and `meas.json` start afresh.
 

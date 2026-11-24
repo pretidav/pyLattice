@@ -8,7 +8,13 @@ import subprocess
 import sys
 import time
 
+from rich.console import Console
 from rich.logging import RichHandler
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
+WIDTH = 110                                       # the widest box, on the terminal and in the file
 
 LOGO = r"""
 __| |_________| |__
@@ -70,6 +76,7 @@ class Parser():
         self.seed = self.args['seed']
         self.debug = self.args['debug']
         self.logfile = self.args['logfile']
+        self.progress = self.args['progress']
         self.beta = self.args['beta']
         self.steps = self.args['steps']
         self.checkpoint_every = self.args['checkpoint_every']
@@ -91,18 +98,26 @@ class Parser():
         parser.add_argument('--seed', type=_seed, default=0, help='seed of the random number generators')
         parser.add_argument('--checkpoint-every', type=_every, default=0, metavar='N',
                             help='save the configuration to ./checkpoints every N sweeps, and at the end (0: never)')
-        parser.add_argument('--runlog-every', type=_every, default=0, metavar='N',
-                            help='write a line to ./run.log every N sweeps: step, observables, memory, '
-                                 'cpu, sweeps per second (0: never)')
+        parser.add_argument('--runlog-every', type=_every, default=None, metavar='N',
+                            help='log a line every N sweeps, on the terminal and in the log file: step, observables, '
+                                 'memory, cpu, sweeps per second (0: never; default: about 20 lines per run)')
         parser.add_argument('--start-from', default=None, metavar='FILE.hdf5',
                             help='start from the configuration saved in this HDF5 file (a checkpoint) instead '
                                  'of a random one; its lattice must match --grid x --mpigrid, the layout '
                                  'of the ranks may differ')
         parser.add_argument('--debug', action='store_true',
                             help='log at DEBUG level, from every rank')
-        parser.add_argument('--logfile', action='store_true',
-                            help='also write the log to a file (see Logger)')
+        parser.add_argument('--logfile', default='run.log', metavar='FILE',
+                            help="the log file: logo, system and run summary, messages and one line per "
+                                 "--runlog-every sweeps, the same as on the terminal but in plain text, appended "
+                                 "to if it exists ('off': no file)")
+        parser.add_argument('--progress', action='store_true',
+                            help='also draw a progress bar (rank 0)')
         args = vars(parser.parse_args(argv))
+        if args['runlog_every'] is None:
+            args['runlog_every'] = max(1, args['steps'] // 20) if args['steps'] else 0
+        if args['logfile'].lower() in ('off', 'none', ''):
+            args['logfile'] = None
         if args['start_from'] is not None and not os.path.isfile(args['start_from']):
             parser.error('--start-from: no such file: {}'.format(args['start_from']))
         if len(args['grid']) != len(args['mpigrid']):
@@ -139,7 +154,10 @@ class _RankFilter(logging.Filter):
 
 
 class Logger():
-    """Logger 'pylattice' with colored output (rich) and, with logfile=True, also a plain-text file.
+    """Logger 'pylattice' with colored output (rich) and, with logfile=True, also a plain-text file (run.log).
+
+    Besides the messages (log.info, ...), show(renderable) prints a rich object (the boxes of the banner, a line of
+    the run log) on the terminal and, in plain text, in the file. Only rank 0 shows anything.
 
     debug: DEBUG level on every rank (otherwise INFO from rank 0, WARNING and above from any rank).
     console: a rich Console to write to (default: the standard rich console, which uses colors when
@@ -151,11 +169,12 @@ class Logger():
     Creating a Logger again replaces the handlers of the previous one; the root logger is not touched.
     """
 
-    def __init__(self, debug, logfile, filename='pylattice.log', console=None, rank=None, size=None):
+    def __init__(self, debug, logfile, filename='run.log', console=None, rank=None, size=None):
         self.debug = debug
         self.logfile = logfile
         self.filename = filename
-        self.console = console
+        self.console = console if console is not None else Console()
+        self.file_console = None
         self.rank, self.size = self._mpi_rank_size(rank, size)
         self.log = self.get_logger(debug=self.debug, logfile=self.logfile)
 
@@ -185,12 +204,34 @@ class Logger():
         logger.addHandler(console_handler)
 
         if logfile:
-            file_handler = logging.FileHandler(self.filename)
+            file_handler = logging.FileHandler(self.filename, encoding='utf-8')
+            self._file_handler = file_handler
+            self.file_console = Console(file=file_handler.stream, width=WIDTH, color_system=None, force_terminal=False,
+                                        highlight=False, emoji=False)
             file_handler.setFormatter(logging.Formatter(
                 '%(asctime)s %(levelname)s:  %(rankprefix)s%(message)s'))
             file_handler.addFilter(rank_filter)
             logger.addHandler(file_handler)
+        else:
+            self.file_console = None
         return logger
+
+    def show(self, renderable):
+        """Prints a rich object (Text, Panel, ...) on the terminal, in color, and in the file as plain text. Rank 0 only."""
+        if self.rank != 0:
+            return
+        line = isinstance(renderable, Text)                 # a line is never wrapped or cut
+        self.console.print(renderable, highlight=False, soft_wrap=line)
+        if self.file_console is not None:
+            self.file_console.print(renderable, soft_wrap=line)
+            self._file_handler.flush()
+
+    def banner(self, parser=None, comm=None):
+        """The logo and the information of run_info(), one box per section. A collective call: every rank makes it."""
+        sections = run_info(parser, comm)
+        self.show(Text(LOGO.strip('\n'), style='cyan'))
+        for panel in info_panels(sections):
+            self.show(panel)
 
 
 def _version(module):
@@ -249,7 +290,8 @@ def run_info(parser=None, comm=None, argv=None):
         ('mpi4py', '{} / {}'.format(_version('mpi4py'), mpi)),
         ('h5py', h5),
         ('pylattice', 'git ' + _git_revision()),
-        ('command', ' '.join(['python', '-m', 'pylattice'] + list(sys.argv[1:] if argv is None else argv))),
+        ('command', ' '.join(getattr(sys, 'orig_argv', None) or ['python'] + sys.argv) if argv is None
+         else ' '.join(['python'] + list(argv))),
         ('directory', os.getcwd()),
     ]
     sections = [('system', system), ('parallel', [
@@ -270,11 +312,11 @@ def run_info(parser=None, comm=None, argv=None):
             ('beta', parser.beta),
             ('steps', parser.steps),
             ('seed', '{} (one independent stream per rank)'.format(parser.seed)),
-            ('start from', parser.start_from or 'random configuration'),
+            ('start from', parser.start_from or 'random configuration (hot start)'),
             ('checkpoint every', parser.checkpoint_every or 'off'),
             ('run log every', parser.runlog_every or 'off'),
             ('debug', parser.debug),
-            ('log file', 'pylattice.log' if parser.logfile else 'off'),
+            ('log file', parser.logfile or 'off'),
             ('measurements', 'meas.json'),
         ]))
     return sections
@@ -291,17 +333,18 @@ def _ranges(ranks):
     return ', '.join(out)
 
 
-def format_run_info(sections):
-    width = max(len(str(name)) for _, items in sections for name, _ in items)
-    lines = []
+def info_panels(sections, width=WIDTH, exact=False):
+    """One rich Panel per section, [(title, [(name, value), ...]), ...], all of the same width: that of the longest
+    line, at most `width` (exactly `width` with exact=True)."""
+    key = max(len(str(name)) for _, items in sections for name, _ in items)
+    natural = key + 2 + max(len(str(value)) for _, items in sections for _, value in items) + 4
+    panels = []
     for title, items in sections:
-        lines.append('--- {} ---'.format(title))
-        lines.extend('  {:<{w}} : {}'.format(name, value, w=width) for name, value in items)
-    return '\n'.join(lines)
-
-
-def log_banner(logger, parser=None, comm=None):
-    """Logs the logo and the information of run_info(). Call it on every rank (collective); the
-    logger lets only rank 0 speak, unless debug is on."""
-    info = format_run_info(run_info(parser, comm))
-    logger.info(LOGO.rstrip() + '\n\n' + info + '\n')
+        table = Table.grid(padding=(0, 2))
+        table.add_column(style='dim', no_wrap=True, min_width=key)
+        table.add_column(overflow='fold')
+        for name, value in items:
+            table.add_row(Text(str(name)), Text(str(value)))
+        panels.append(Panel(table, title=Text(title, style='bold cyan'), title_align='left', border_style='cyan',
+                            width=width if exact else min(natural, width), expand=True))
+    return panels

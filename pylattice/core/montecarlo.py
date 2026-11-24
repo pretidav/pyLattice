@@ -30,6 +30,7 @@ every rank at the same steps, so they may use collective MPI calls.
 import numpy as np
 from mpi4py import MPI
 
+from pylattice.core.parallel import allsum
 from pylattice.core.rng import rank_rng
 from rich.progress import Progress, BarColumn, MofNCompleteColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 
@@ -198,7 +199,7 @@ def run(model, steps, thermalization=0, measure_every=1, progress=True, measure=
             accepted += int(a)
             attempted += int(t)
             if measure and n % measure_every == 0:
-                total_accepted, total_attempted = comm.allreduce(np.array([accepted, attempted]))
+                total_accepted, total_attempted = allsum(comm, [accepted, attempted])
                 measured(n, total_accepted / total_attempted if total_attempted else float('nan'))
                 accepted = attempted = 0
             for callback in every_sweep:

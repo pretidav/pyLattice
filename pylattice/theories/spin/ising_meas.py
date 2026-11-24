@@ -49,11 +49,11 @@ def main(argv=None):
                         '(default: all the ranks along the first direction)')
     parser.add_argument('--out', default='meas.json', help='the measurements file')
     parser.add_argument('--debug', action='store_true', help='log at DEBUG level, from every rank')
-    parser.add_argument('--logfile', action='store_true', help='also write the log to pylattice.log')
+    parser.add_argument('--logfile', action='store_true', help='also write the log to ising_meas.log')
     args = parser.parse_args(argv)
 
     comm = MPI.COMM_WORLD
-    log = Logger(debug=args.debug, logfile=args.logfile).log
+    log = Logger(debug=args.debug, logfile=args.logfile, filename='ising_meas.log').log
     try:
         attrs = describe(args.files[0], comm)['attrs']
         total = [int(g) for g in attrs['grid']]
