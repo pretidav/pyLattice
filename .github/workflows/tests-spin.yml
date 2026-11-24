@@ -1,0 +1,76 @@
+name: Tests spin
+
+# spin (the Ising model, measurements)
+# Runs only when a file that these tests cover changes in the push: the source files they import, the tests and the
+# files that configure the run (tests/utils/test_ci_paths.py checks that this list is complete). The tests are chosen
+# in run_tests.py (chunk_of); run them locally with  python run_tests.py --chunk spin
+on:
+  push:
+    paths:
+      # the source files the tests import
+      - 'pylattice/__init__.py'
+      - 'pylattice/core/__init__.py'
+      - 'pylattice/core/callbacks.py'
+      - 'pylattice/core/cli.py'
+      - 'pylattice/core/driver.py'
+      - 'pylattice/core/grid.py'
+      - 'pylattice/core/groups/__init__.py'
+      - 'pylattice/core/groups/base.py'
+      - 'pylattice/core/groups/discrete.py'
+      - 'pylattice/core/hdf5io.py'
+      - 'pylattice/core/measure.py'
+      - 'pylattice/core/montecarlo.py'
+      - 'pylattice/core/parallel.py'
+      - 'pylattice/core/rng.py'
+      - 'pylattice/core/stats.py'
+      - 'pylattice/core/tensors.py'
+      - 'pylattice/theories/__init__.py'
+      - 'pylattice/theories/spin/__init__.py'
+      - 'pylattice/theories/spin/ising.py'
+      - 'pylattice/theories/spin/ising_meas.py'
+      - 'pylattice/utils/__init__.py'
+      - 'pylattice/utils/plot_meas.py'
+      # the tests
+      - 'tests/theories/spin/test_ising.py'
+      - 'tests/theories/spin/test_ising_meas.py'
+      - 'tests/utils/test_ci_paths.py'
+      - 'tests/utils/test_plot_meas.py'
+      - 'tests/utils/test_run_tests.py'
+      # the configuration of the run
+      - '.github/workflows/tests-spin.yml'
+      - 'conftest.py'
+      - 'pyproject.toml'
+      - 'requirements.txt'
+      - 'run_tests.py'
+  workflow_dispatch:
+
+# a new push to a branch cancels the run still going for the previous one
+concurrency:
+  group: tests-spin-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30                    # a hung MPI run would otherwise go on for hours
+    env:
+      # the tests import pylattice from the repo root
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: mpi4py/setup-mpi@v1
+        with:
+          mpi: openmpi
+      - name: Install Python 3
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip                       # the downloads of requirements.txt are reused between runs
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      # run_tests.py lists every test of the repository and which chunk each belongs to. The steps that need an h5py built with
+      # parallel HDF5 (not installed here) are skipped and reported as such, not failed.
+      - name: Run the spin tests
+        run: python run_tests.py --chunk spin -v

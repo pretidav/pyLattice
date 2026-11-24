@@ -1,4 +1,4 @@
-[![Run Python Tests](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml/badge.svg?branch=main)](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml)
+[![Tests core](https://github.com/pretidav/pyLattice/actions/workflows/tests-core.yml/badge.svg?branch=main)](https://github.com/pretidav/pyLattice/actions/workflows/tests-core.yml) [![Tests gauge](https://github.com/pretidav/pyLattice/actions/workflows/tests-gauge.yml/badge.svg?branch=main)](https://github.com/pretidav/pyLattice/actions/workflows/tests-gauge.yml) [![Tests spin](https://github.com/pretidav/pyLattice/actions/workflows/tests-spin.yml/badge.svg?branch=main)](https://github.com/pretidav/pyLattice/actions/workflows/tests-spin.yml)
 
 # pyLattice
 <p align="center">
@@ -267,17 +267,34 @@ python run_tests.py              # the standard routine: single process and 2 ra
 python run_tests.py --quick      # only the single-process tests (about 15 s)
 python run_tests.py --full       # also every MPI test on 1 and 4 ranks, and the cross-layout HDF5 test
 python run_tests.py -k ising     # only the steps whose name contains "ising"
+python run_tests.py --chunk gauge   # only one chunk of the tests: core, gauge or spin
 python run_tests.py -v           # show the output of every step, not only of the failed ones
 ~~~
 
 It prints the system it found (packages, `mpiexec`, cores, parallel `h5py`), one coloured line per step
 (`PASS`, `FAIL` with the end of its output, or `SKIP` with the reason), and a summary; the exit status is 1 if
 anything failed, so it can be used in your own scripts. The steps run in a scratch directory and leave no files
-behind. They are the same checks as the GitHub workflow (`.github/workflows/testonbuild.yml`) plus the ones that
-need 4 ranks. Without a parallel `h5py` the tests that write checkpoints (checkpoints, restart, offline
+behind. They are the same checks as the GitHub workflows plus the ones that need 4 ranks. Without a parallel `h5py` the tests that write checkpoints (checkpoints, restart, offline
 measurements, the HDF5 tests) are skipped and say so; the GitHub workflow has no parallel `h5py` either.
 
 A new test file has to be added to the lists at the top of `run_tests.py`: a test checks that none is missing.
+
+### Continuous integration
+
+The tests are split into three chunks, each with its own GitHub workflow and badge (`.github/workflows/tests-<chunk>.yml`):
+
+| chunk | tests |
+|---|---|
+| `core` | tensors, lattices and shifts, MPI, command line, random streams, statistics, Monte Carlo driver, checkpoints |
+| `gauge` | the groups (Z2, SU(2), SU(N)) and the SU(N) gauge theory: field, sweeps, offline measurements |
+| `spin` | the Ising model, its offline measurements, printing and plotting of measurements |
+
+A push runs a chunk only if a file that the chunk covers changed: the source files its tests import, the tests, and the
+configuration of the run. A change in the gauge theory runs `gauge` only; a change in the shared code (`pylattice/core/`)
+runs the chunks that use it; documentation runs nothing. A badge shows the last run of its chunk, so it can be older than
+the latest commit. Each workflow runs `python run_tests.py --chunk <chunk>`. `tests/utils/test_ci_paths.py` fails if a filter
+misses a file that its chunk imports, and `tests/utils/test_run_tests.py` if a test file is in no chunk; the tests of
+the repository itself run in every chunk. Which chunk a test belongs to is decided in `run_tests.py` (`chunk_of`).
 
 To run a test file by hand (needs `pip install -e . --no-deps`, or `export PYTHONPATH=.`):
 

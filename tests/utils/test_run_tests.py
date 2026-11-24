@@ -44,3 +44,36 @@ def test_the_summary_shown_next_to_a_pass():
     assert run_tests.summary_of('....\n571 passed in 12.24s\n') == '571 passed'
     assert run_tests.summary_of('[+] a passed on 2 rank(s)\n[+] b passed on 2 rank(s)\n[-] c skipped: x\n') == '2 tests, 1 skipped'
     assert run_tests.summary_of('') == ''
+
+
+def test_every_test_file_belongs_to_one_chunk_or_runs_in_all_of_them():
+    listed = run_tests.all_files_of_the_routine()
+    assert {run_tests.chunk_of(f) for f in listed} == {None, 'core', 'gauge', 'spin'}
+    assert {f for f in listed if run_tests.chunk_of(f) is None} == set(run_tests.EVERY_CHUNK)
+    union = set()
+    for chunk in run_tests.CHUNKS:
+        files = set(run_tests.files_of_chunk(chunk))
+        assert set(run_tests.EVERY_CHUNK) <= files                                   # the checks of the repository run everywhere
+        assert not any(run_tests.chunk_of(f) not in (chunk, None) for f in files)
+        union |= files
+    assert union == listed                                                           # no test is left out of every chunk
+    assert run_tests.chunk_of('tests/theories/gauge/test_gauge_sun.py') == 'gauge' and run_tests.chunk_of('tests/core/test_su.py') == 'gauge'
+    assert run_tests.chunk_of('tests/theories/spin/test_ising.py') == 'spin' and run_tests.chunk_of('tests/utils/test_plot_meas.py') == 'spin'
+    assert run_tests.chunk_of('tests/core/test_cli.py') == 'core' and run_tests.chunk_of('tests/core/test_hdf5io.py') == 'core'
+
+
+def test_the_steps_of_a_chunk_are_its_tests_and_together_they_are_all_the_steps():
+    names = lambda **kw: [s.name for s in run_tests.build_steps('mpiexec', **kw)]
+    everything = set(names(full=True))
+    together = set()
+    for chunk in run_tests.CHUNKS:
+        steps = run_tests.build_steps('mpiexec', full=True, chunk=chunk)
+        pytest_files = steps[0].commands[0]
+        assert any(a.endswith('tests/utils/test_run_tests.py') for a in pytest_files)          # in every chunk
+        assert not any(a.endswith(f) for a in pytest_files for f in run_tests.PYTEST_FILES if run_tests.chunk_of(f) not in (chunk, None))
+        together |= {s.name for s in steps}
+    assert together == everything                                                       # nothing is run twice by name, nothing is lost
+    assert 'test_gauge_sun.py on 2 ranks' in names(chunk='gauge') and 'test_gauge_sun.py on 2 ranks' not in names(chunk='spin')
+    assert 'test_ising.py on 2 ranks' in names(chunk='spin') and 'test_ising.py on 2 ranks' not in names(chunk='core')
+    assert 'test_hdf5io.py on 4 ranks' in names(chunk='core') and 'test_hdf5io.py on 4 ranks' not in names(chunk='gauge')
+    assert names(chunk='gauge', quick=True) == ['pytest (single process)']
