@@ -108,7 +108,7 @@ def test_runlog_one_line_per_log_step_with_the_requested_fields():
             assert int(values['step']) == step
             assert float(values['x']) == step and float(values['y']) == 2 * step     # the observables of that sweep
             assert 0.7 * everyone < float(values['mem_MB']) < 1.3 * everyone     # the memory of all the ranks, not of one
-            assert 0.0 <= float(values['cpu_pct']) <= 1000.0
+            assert 0.0 <= float(values['cpu_pct']) <= 400.0              # a few sweeps of nothing: about one core, never 1699
             assert float(values['steps_per_s']) > 0
 
 
@@ -141,6 +141,41 @@ def test_runlog_cpu_follows_the_use_of_the_processor():
             cpu = lambda path: [float(dict(parse(l))['cpu_pct']) for l in open(path).read().splitlines()]
             assert all(50 < c < 150 for c in cpu(busy)), cpu(busy)       # a core, spinning: the mean over the ranks, not the sum
             assert all(c < 30 for c in cpu(idle)), cpu(idle)             # asleep
+
+
+def cpu_values(path):
+    return [float(dict(parse(line))['cpu_pct']) for line in open(path).read().splitlines()]
+
+
+def test_runlog_cpu_does_not_depend_on_the_counters_of_the_system():
+    # psutil's cpu_percent divides ticks of the system clock: over the microseconds between two lines it
+    # once gave 1699 for sweeps that do nothing. The log measures the cpu time of the process itself.
+    original = psutil.Process.cpu_percent
+    psutil.Process.cpu_percent = lambda self, *args, **kwargs: 1699.1
+    try:
+        with shared_tempdir() as d:
+            path = os.path.join(d, 'run.log')
+            montecarlo.run(Toy(), steps=60, progress=False, callbacks=[RunLog(2, path)])
+            if RANK == 0:
+                values = cpu_values(path)
+                assert len(values) == 30 and 1699.1 not in values and max(values) <= 400.0, values
+            COMM.Barrier()
+    finally:
+        psutil.Process.cpu_percent = original
+
+
+def test_runlog_cpu_stays_sane_over_very_short_intervals():
+    with shared_tempdir() as d:
+        values = []
+        for run in range(8):                                                   # microseconds between the lines
+            path = os.path.join(d, 'run{}.log'.format(run))
+            montecarlo.run(Toy(), steps=30, progress=False, callbacks=[RunLog(3, path)])
+            if RANK == 0:
+                values += cpu_values(path)
+        if RANK == 0:
+            assert len(values) == 80 and 0.0 <= min(values) and max(values) <= 400.0, (min(values), max(values))
+            assert sorted(values)[40] > 40.0                                   # a process that is running: about one core
+        COMM.Barrier()
 
 
 def test_runlog_lines_are_flushed_as_they_are_written():

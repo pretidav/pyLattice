@@ -119,7 +119,8 @@ class RunLog:
     step          sweeps since run() started (thermalization included)
     observables   those of the model, in the order it gives them
     mem_MB        resident memory of all the ranks together
-    cpu_pct       cpu use of a rank since the previous line, averaged over the ranks (100 = one core)
+    cpu_pct       cpu time of a rank (all its threads) over wall time, since the previous line, averaged
+                  over the ranks: 100 = one core fully used (more with threads), near 0 when it waits
     steps_per_s   sweeps per second of wall time since the previous line
 
     The file is appended to (mode='w' starts it afresh) and flushed at every line.
@@ -133,21 +134,24 @@ class RunLog:
     def start(self, model):
         self.comm = getattr(model, 'comm', MPI.COMM_WORLD)
         self.process = psutil.Process()
-        self.process.cpu_percent(interval=None)            # the first call only starts the counter
         if self.comm.Get_rank() == 0:
             self.file = open(self.filename, self.mode)
         self.last_step = 0
         self.last_time = time.perf_counter()
+        self.last_cpu = time.process_time()
 
     def __call__(self, model, step, observables):
         if step % self.every:
             return
-        now = time.perf_counter()
+        now, cpu_now = time.perf_counter(), time.process_time()
+        elapsed = max(now - self.last_time, 1e-9)
         values = observables()                               # these three are collective calls
         memory = self.comm.allreduce(self.process.memory_info().rss)
-        cpu = self.comm.allreduce(self.process.cpu_percent(interval=None)) / self.comm.Get_size()
+        # the cpu time of this process against the wall time: it does not depend on the counters of the
+        # system, whose ticks are too coarse for the short interval between two lines
+        cpu = self.comm.allreduce(100.0 * (cpu_now - self.last_cpu) / elapsed) / self.comm.Get_size()
         if self.comm.Get_rank() == 0:
-            speed = (step - self.last_step) / (now - self.last_time)
+            speed = (step - self.last_step) / elapsed
             line = 'step={}'.format(step)
             line += ''.join(' {}={:.6g}'.format(name, value) for name, value in values.items())
             line += ' mem_MB={:.1f} cpu_pct={:.1f} steps_per_s={:.2f}'.format(memory / 2 ** 20, cpu, speed)
@@ -155,6 +159,7 @@ class RunLog:
             self.file.flush()
         self.last_step = step
         self.last_time = time.perf_counter()               # the time spent here is not counted in the speed
+        self.last_cpu = time.process_time()
 
     def finish(self, model, step):
         if self.file is not None:
