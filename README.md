@@ -1,100 +1,217 @@
-[![Run Python Tests](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml/badge.svg?branch=refactor-SU2)](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml)
+[![Run Python Tests](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml/badge.svg?branch=main)](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml)
 
 # pyLattice
 <p align="center">
   <img width="150" height="150" src="docs/mylogo.png">
 </p>
-A lattice (gauge) theory simulation library in python.  
 
-## Repository layout
+A lattice (gauge) theory simulation library in Python, parallel with MPI. A lattice is split over MPI ranks,
+a theory provides the Monte Carlo sweep, and the library provides the rest: checkpoints and exact restarts,
+logs, measurements written as the run goes, and offline analysis.
+
+Implemented: the Ising model (spin theories on sites) and SU(2) fields and groups (gauge theories on links, the
+Monte Carlo is not written yet).
+
+**Contents:** [Installation](#installation) · [Quick start](#quick-start) · [Running a simulation](#running-a-simulation) ·
+[Working with the results](#working-with-the-results) · [Repository layout](#repository-layout) · [Tests](#tests) ·
+[Performance](#performance) · [Citation](#citation)
+
+---
+
+## Installation
+
+pyLattice needs MPI and an `h5py` built with **parallel HDF5** (the standard PyPI `h5py` wheels are not).
+The simplest way is a conda-forge environment, where MPI, HDF5, `mpi4py` and `h5py` are built against each other.
+
+### macOS (Apple Silicon) and Linux, with conda-forge
 
 ~~~
-pylattice/
-  core/            tensors, lattice fields on an MPI grid, parallel HDF5 I/O, command line,
-                   Monte Carlo driver (the theories provide the sweep)
-    groups/        groups and algebras (SU(2) for now)
-  theories/
-    spin/          variables on sites: Ising
-    gauge/         variables on links: SU(2) gauge field
-tests/             mirrors the package (tests/core, tests/theories)
-benchmarks/        performance evaluation, parallel HDF5 demo
-docs/              notes
+conda create -n pylattice -c conda-forge --override-channels \
+  python=3.11 numpy scipy matplotlib psutil pytest rich openmpi mpi4py "h5py=*=mpi_openmpi*"
+conda activate pylattice
+pip install "plot_style @ git+https://github.com/pretidav/plot_style.git"   # style of the figures, not on conda
+pip install -e . --no-deps                                                  # optional: import pylattice from anywhere
 ~~~
 
-Run everything from the repository root, or install the package once with `pip install -e . --no-deps`
-(after the environment below), which makes `pylattice` importable from any directory.
+- `--override-channels` uses only conda-forge and ignores the channels of your conda config, so packages from
+  different channels are not mixed.
+- Without `pip install -e .`, run everything from the repository root (or `export PYTHONPATH=.`).
+- `pip install -r requirements.txt` alone is not enough: it has no `h5py`, and the PyPI one has no parallel HDF5.
+  Without parallel `h5py` everything works except checkpoints, restart and offline measurements (their tests are
+  skipped).
 
-The error analysis (`pylattice.core.stats`) includes the code of
-[py-uwerr](https://github.com/pretidav/py-uwerr) (Wolff's Gamma method, MIT license, see the header of the file).
-If you publish results obtained with it, cite U. Wolff, *Monte Carlo errors with less errors*,
-Comput. Phys. Commun. **156**, 143 (2004), [hep-lat/0306017](https://arxiv.org/abs/hep-lat/0306017).
+Check it:
 
-# Ising Model 
+~~~
+python -c "import h5py; print(h5py.get_config().mpi)"   # must print True
+mpiexec -n 2 python tests/core/test_grid_mpi.py
+~~~
+
+MPI uses physical cores only: `python -c "import psutil; print(psutil.cpu_count(logical=False))"`. With more ranks
+than cores add `--oversubscribe` to `mpiexec`.
+
+### Linux without conda
+
+Install a C++ compiler and `make` (`sudo apt-get install g++ make`), then OpenMPI following
+[this guide](https://edu.itp.phys.ethz.ch/hs12/programming_techniques/openmpi.pdf), then `mpi4py` and a parallel
+`h5py` (`conda install -c conda-forge mpi4py openmpi "h5py>=2.9=mpi*"`).
+
+---
+
+## Quick start
 
 ~~~
 mpiexec -np 4 python -m pylattice.theories.spin.ising --grid=20x20 --mpigrid=2x2 --beta=1.5 --steps=2000
 ~~~
 
-Every run writes its measurements to `meas.json`, each one flushed to the file as soon as it is
-computed (not at the end), so the file can be read while the run goes on and survives a job that dies:
+`--grid` is the lattice of **each rank** and `--mpigrid` the number of ranks along each direction, so this is a
+40x40 lattice on 4 ranks (every local size must be even). The run prints the pyLattice logo and a summary of
+the system and of the run (OS, architecture, MPI, `h5py`, lattice, parameters), shows a progress bar, and writes
+`meas.json`. It plots nothing: plotting is done offline, see [below](#working-with-the-results).
 
-~~~
-{"measurements": [
-  {"sweep": 0, "m": 0.026, "e": 0.01, "acceptance": null},
-  {"sweep": 1, "m": 0.056, "e": -0.957, "acceptance": 0.581}
-]}
-~~~
+---
 
-It is valid JSON at every moment (`json.load(open('meas.json'))['measurements']`, or
-`pandas.DataFrame(...)`); the sweep counts from the end of the thermalization, and `acceptance` is
-that of the sweeps since the previous measurement. An existing `meas.json` is overwritten.
+## Running a simulation
 
-The run itself plots nothing: it produces configurations and `meas.json`. Look at the measurements offline,
-while the run goes on or after it:
+### Command line options
 
-~~~
-python -m pylattice.utils.plot_meas meas.json --skip 200 --outdir figures   # --no-plot: only the table
-~~~
-
-Measurements can also be made afterwards on stored configurations (the checkpoints), without running
-any Monte Carlo; each file is first checked to be an Ising configuration of the right lattice, and the
-structure found is logged:
-
-~~~
-mpiexec -np 4 python -m pylattice.theories.spin.ising_meas checkpoints/ising_*.hdf5 --mpigrid=2x2 --out meas_offline.json
-~~~
-
-It writes the same kind of `meas.json` (sweep = the step of the checkpoint, no acceptance) with `m`,
-`abs_m`, `m2`, `e`, `e2` per site, in the order of the steps; the layout of the ranks may differ from the
-run's. Other theories plug into `pylattice.core.measure.measure_files` with their own `measure(path)`.
-
-`plot_meas` prints, for every observable and the acceptance, the mean, its error and the integrated
-autocorrelation time, and writes one figure per quantity (`figures/m.png`, ...).
-
-Two options, both off by default, record the run (they need `--steps` sweeps to be longer than the interval):
+| option | default | meaning |
+|---|---|---|
+| `--grid AxBx...` | `4x4` | lattice size of each rank (the global lattice is `grid` x `mpigrid`) |
+| `--mpigrid AxBx...` | `1x2` | number of ranks along each direction (run with `mpiexec -np <product>`) |
+| `--steps N` | `100` | Monte Carlo sweeps |
+| `--beta B` | `0.5` | inverse temperature |
+| `--seed S` | `0` | seed; every rank draws from its own independent stream of `S` |
+| `--checkpoint-every N` | `0` (off) | save the configuration every N sweeps, and at the end |
+| `--runlog-every N` | `0` (off) | write a line of diagnostics to `run.log` every N sweeps |
+| `--start-from FILE.hdf5` | none | start from a saved configuration instead of a random one |
+| `--debug` | off | log at DEBUG level, from every rank |
+| `--logfile` | off | also write the log to `pylattice.log` |
 
 ~~~
 mpiexec -np 4 python -m pylattice.theories.spin.ising --grid=20x20 --mpigrid=2x2 --beta=1.5 --steps=2000 \
     --checkpoint-every=500 --runlog-every=100
 ~~~
 
-- `--checkpoint-every N` saves the configuration (parallel HDF5, read it with `pylattice.core.hdf5io.Reader`)
-  to `checkpoints/ising_<sweep>.hdf5` every N sweeps and at the end.
-- `--start-from FILE.hdf5` starts from a saved configuration (e.g. `checkpoints/ising_00000500.hdf5`)
-  instead of a random one. The log shows what is on disk (type, lattice, dataset shape and dtype, who
-  wrote it and when) and what is being filled, and the run stops with a message if they differ. The
-  lattice must be the same (`--grid` x `--mpigrid`). Checkpoints also hold the random state of every rank:
-  restarting on the same rank layout continues the run exactly (bit for bit, as if it had not stopped);
-  on another layout the configuration is loaded but the random numbers start afresh (the log warns).
-  The sweep counter and `meas.json` start afresh.
-- `--seed S` fixes the run: every rank draws from its own independent stream of `S`
-  (`pylattice.core.rng`, numpy `SeedSequence`), so a run is reproducible for a given seed and rank layout.
-- `--runlog-every N` appends a line to `run.log` every N sweeps:
-  `step=100 m=0.12 e=-1.91 mem_MB=312.4 cpu_pct=98.7 steps_per_s=211.30`
-  (sweeps since the start, the observables, resident memory of all the ranks, mean cpu use per rank,
-  sweeps per second).
+### What a run writes
 
-## Performance Test 
+| file | when | content |
+|---|---|---|
+| `meas.json` | always | every measurement, flushed as soon as it is made (see below) |
+| `checkpoints/ising_<sweep>.hdf5` | `--checkpoint-every` | configuration (parallel HDF5) and the random state of every rank |
+| `run.log` | `--runlog-every` | `step=100 m=0.12 e=-1.91 mem_MB=312.4 cpu_pct=98.7 steps_per_s=211.30` |
+| `pylattice.log` | `--logfile` | the log: logo, system and run summary, messages |
+
+- `run.log` has one line per interval: the sweep (thermalization included), the observables, the resident memory of
+  all the ranks together, the mean cpu use per rank (100 = one core fully busy) and the sweeps per second.
+- `meas.json` is valid JSON at every moment, so it can be read while the run goes on and it survives a job that
+  dies. An existing one is overwritten.
+
+  ~~~
+  {"measurements": [
+    {"sweep": 0, "m": 0.026, "e": 0.01, "acceptance": null},
+    {"sweep": 1, "m": 0.056, "e": -0.957, "acceptance": 0.581}
+  ]}
+  ~~~
+
+  Read it with `json.load(open('meas.json'))['measurements']` (or `pandas.DataFrame(...)`). The sweep counts from
+  the end of the thermalization; `acceptance` is that of the sweeps since the previous measurement. `m` and `e` are
+  per site.
+
+### Restart
+
+~~~
+mpiexec -np 4 python -m pylattice.theories.spin.ising --grid=20x20 --mpigrid=2x2 --beta=1.5 --steps=1500 \
+    --start-from=checkpoints/ising_00000500.hdf5
+~~~
+
+The log shows what is on disk (type, lattice, dataset shape and dtype, who wrote it and when) and what is being
+filled, and the run stops with a message if they differ (wrong type, wrong lattice, values that are not spins).
+
+- The lattice must be the same (`--grid` x `--mpigrid`).
+- Checkpoints hold the random state of every rank. On the **same rank layout** the restarted run continues exactly,
+  bit for bit, as if it had not stopped. On another layout the configuration is loaded but the random numbers
+  start afresh (the log warns).
+- The sweep counter and `meas.json` start afresh.
+
+---
+
+## Working with the results
+
+### Print and plot the measurements
+
+~~~
+python -m pylattice.utils.plot_meas meas.json --skip 200 --outdir figures      # --no-plot: only the table
+~~~
+
+It needs no MPI and works while the run is still going. For every observable and for the acceptance it prints the
+number of points, the mean, its error (batch means) and the integrated autocorrelation time (Wolff's Gamma method),
+and it writes one figure per quantity (`figures/m.png`, ...). `--skip` leaves out the thermalization.
+
+### Measure stored configurations
+
+Measurements can be made afterwards on the checkpoints, without running any Monte Carlo:
+
+~~~
+mpiexec -np 4 python -m pylattice.theories.spin.ising_meas checkpoints/ising_*.hdf5 --mpigrid=2x2 --out meas_offline.json
+~~~
+
+Each file is first checked to be an Ising configuration of the right lattice (the structure found is logged). The
+output is a `meas.json` in the same format (sweep = the step of the checkpoint, no acceptance) with `m`, `abs_m`,
+`m2`, `e` and `e2` per site, in the order of the steps. The rank layout may differ from the run's. Other theories
+plug in with their own `measure(path)` through `pylattice.core.measure.measure_files`.
+
+---
+
+## Repository layout
+
+~~~
+pylattice/
+  core/            tensors, lattice fields on an MPI grid, parallel HDF5 I/O, command line, random streams,
+                   statistics, Monte Carlo driver (the theories provide the sweep), callbacks
+                   (checkpoints, run log, measurements file), offline measurements
+    groups/        groups and algebras (SU(2) for now)
+  theories/
+    spin/          variables on sites: Ising (simulation and offline measurements)
+    gauge/         variables on links: SU(2) gauge field
+  utils/           plot_meas: print and plot a meas.json
+tests/             mirrors the package (tests/core, tests/theories, tests/utils)
+benchmarks/        performance evaluation, parallel HDF5 demo
+docs/              notes
+~~~
+
+A theory is a class with `sweep(rng) -> (accepted, attempted)` and `observables() -> dict`; the driver
+(`pylattice.core.montecarlo.run`) handles thermalization, measurements, progress and the callbacks. All the
+randomness of a sweep comes from the generator it is given, which is what makes runs reproducible.
+
+---
+
+## Tests
+
+Tests run on one process with `pytest`, and the MPI ones also as scripts on several ranks:
+
+~~~
+pytest tests/core/test_tensors.py tests/core/test_cli.py tests/core/test_rng.py tests/core/test_stats.py \
+       tests/core/test_montecarlo.py tests/core/test_callbacks.py tests/theories tests/utils
+python tests/core/test_grid.py
+python tests/core/test_grid_eo.py
+mpiexec -n 2 python tests/core/test_grid_mpi.py
+mpiexec -n 4 python tests/core/test_hdf5io.py          # needs exactly 4 ranks (2x2 grid)
+mpiexec -n 2 python tests/core/test_rng.py
+mpiexec -n 2 python tests/core/test_montecarlo.py
+mpiexec -n 2 python tests/core/test_callbacks.py
+mpiexec -n 2 python tests/theories/spin/test_ising.py          # 1, 2 or 4 ranks
+mpiexec -n 2 python tests/theories/spin/test_ising_meas.py
+~~~
+
+The tests that write checkpoints (checkpoints, restart, offline measurements) are skipped without a parallel
+`h5py`; the GitHub workflow (`.github/workflows/testonbuild.yml`) runs all the others, so those are skipped there.
+
+---
+
+## Performance
+
+Strong scaling at fixed global size, best of 3 runs. "Naive" is a plain per-site `np.dot` loop without MPI.
 
 ~~~
 Grid 40x40x40x40
@@ -108,100 +225,25 @@ MatrixField2 = LatticeRealMatrix(lattice=Grid,N=2)
 @ Apple M4 Pro (10 performance + 4 efficiency cores)
 ~~~
 
-Strong scaling at fixed global size, best of 3 runs. "Naive" is a plain per-site `np.dot` loop without MPI.
-
 ~~~
 mpiexec -np 4 python benchmarks/performance_evaluation.py --mpigrid=2x2x1x1
 ~~~
 
 ![Performance comparison: Intel i5-8365U vs Apple M4 Pro](benchmarks/fig/perf_compare.png)
 
-
-## macOS installation (Apple Silicon, conda-forge)
-
-Tested on macOS with an Apple Silicon (arm64) Mac. Everything comes from conda-forge, so MPI, HDF5, `mpi4py` and `h5py` are built against each other and no `apt-get` or manual OpenMPI build is needed.
-
-~~~
-conda create -n pylattice -c conda-forge --override-channels \
-  python=3.11 numpy scipy matplotlib psutil pytest rich openmpi mpi4py "h5py=*=mpi_openmpi*"
-conda activate pylattice
-pip install "plot_style @ git+https://github.com/pretidav/plot_style.git"   # style of the figures, not on conda
-~~~
-
-- `--override-channels` makes conda use only conda-forge and ignore the channels in your conda config. This avoids mixing packages from different channels.
-- `plot_style` is not on conda-forge: it is installed from GitHub with `pip`, also by `pip install -r requirements.txt`.
-- `pip install -r requirements.txt` alone is not enough: the standard `h5py` wheels from PyPI have no parallel HDF5 (`mpio`) support, and `scipy` and `h5py` are not listed in `requirements.txt`.
-
-Check the installation:
-
-~~~
-python -c "import h5py; print(h5py.get_config().mpi)"   # must print True
-export PYTHONPATH=.          # run from the repository root (not needed after pip install -e . --no-deps)
-pytest tests/core/test_tensors.py
-python tests/core/test_grid.py
-mpiexec -n 2 python tests/core/test_grid_mpi.py
-mpiexec -n 4 python tests/core/test_hdf5io.py
-pytest tests/core/test_rng.py tests/core/test_stats.py
-mpiexec -n 2 python tests/core/test_rng.py              # one independent random stream per rank
-pytest tests/core/test_montecarlo.py tests/core/test_callbacks.py
-mpiexec -n 2 python tests/core/test_callbacks.py        # checkpoints and run log (the checkpoint tests need parallel h5py)
-mpiexec -n 2 python tests/core/test_montecarlo.py   # the driver, also on a split job
-pytest tests/theories/spin/test_ising.py
-mpiexec -n 2 python tests/theories/spin/test_ising.py      # same checks on a lattice split over 2 (or 1, 4) ranks
-~~~
-
-`test_hdf5io.py` uses a 2x2 process grid, so it needs exactly 4 processes. On a Mac with fewer than 4 physical cores, add `--oversubscribe` to `mpiexec`.
-
-## MPI installation (Linux)
-
-### install OpenMPI 
-if c++ compiler is not present: 
-~~~
-sudo apt-get install g++
-~~~
-
-if make is not present: 
-~~~
-sudo apt install make
-~~~
-then follow: 
-~~~
-https://edu.itp.phys.ethz.ch/hs12/programming_techniques/openmpi.pdf
-~~~
-
-### install mpi4py - openmpi 
-~~~
-conda install -c conda-forge mpi4py openmpi
-~~~
-
-### note 
-mpi takes advantage of physical CPUs only. 
-This number can be checked with 
-~~~
-import psutil 
-print(psutil.cpu_count(logical=False))
-~~~
-
-## HDF5 installation 
-
-~~~
-conda install -c conda-forge "h5py>=2.9=mpi*"
-~~~
-
-Run test script 
+### Parallel HDF5 demo
 
 ~~~
 mpiexec -n 4 python benchmarks/hdf5_demo.py
+h5dump -n parallel_test.hdf5          # structure of the file
+h5dump -D /test parallel_test.hdf5    # the data
 ~~~
 
-check hdf5 file output structure with 
+---
 
-~~~
-h5dump -n parallel_test.hdf5
-~~~
+## Citation
 
-and inspect it with 
-
-~~~
-h5dump -D /test parallel_test.hdf5
-~~~
+The error analysis (`pylattice.core.stats`) includes the code of
+[py-uwerr](https://github.com/pretidav/py-uwerr) (Wolff's Gamma method, MIT license, see the header of the file).
+If you publish results obtained with it, cite U. Wolff, *Monte Carlo errors with less errors*,
+Comput. Phys. Commun. **156**, 143 (2004), [hep-lat/0306017](https://arxiv.org/abs/hep-lat/0306017).
