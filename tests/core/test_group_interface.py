@@ -9,9 +9,10 @@ from abc import ABC
 from pylattice.core.groups.base import Group
 from pylattice.core.groups.discrete import Z, Z2, DiscreteGroup
 from pylattice.core.groups.lie import LieGroup
+from pylattice.core.groups.su import SU
 from pylattice.core.groups.su2 import SU2
 
-GROUPS = [Z2, Z(3), Z(7), SU2]
+GROUPS = [Z2, Z(3), Z(7), SU2, SU(3), SU(4)]
 ids = [repr(g) for g in GROUPS]
 
 
@@ -28,7 +29,7 @@ def test_the_classes_form_the_expected_hierarchy():
         Group()                                                                   # abstract
     with pytest.raises(TypeError):
         LieGroup()
-    assert [repr(g) for g in GROUPS] == ['Z2', 'Z3', 'Z7', 'SU(2)']
+    assert [repr(g) for g in GROUPS] == ['Z2', 'Z3', 'Z7', 'SU(2)', 'SU(3)', 'SU(4)']
 
 
 @pytest.mark.parametrize('g', GROUPS, ids=ids)

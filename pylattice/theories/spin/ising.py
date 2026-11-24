@@ -136,9 +136,9 @@ def main(argv=None):
     """Command line driver, e.g.
     mpiexec -np 4 python -m pylattice.theories.spin.ising --grid=20x20 --mpigrid=2x2 --beta=1.5 --steps=2000
     """
-    PP = Parser(argv)
+    PP = Parser(argv, theory='ising')                 # the files are named ising_grid<grid>_mpi<mpigrid>_b<beta>...
     CC = CartesianComm(mpigrid=PP.mpigrid)
-    LL = Logger(debug=PP.debug, logfile=PP.logfile is not None, filename=PP.logfile or 'run.log')
+    LL = Logger(debug=PP.debug, logfile=PP.log_filename() is not None, filename=PP.log_filename() or 'run.log')
     LL.banner(PP, CC.comm)                        # logo, system and run information, in boxes
     rng = CC.rng(PP.seed)                         # an independent stream on every rank
 
@@ -149,7 +149,7 @@ def main(argv=None):
                     "the sweep counter starts afresh".format(PP.steps, step))
     model = IsingModel(field=field, logger=LL.log, beta=PP.beta, rng=rng)
 
-    run_simulation(model, PP, LL, prefix='ising')     # sweeps, measurement file, checkpoints, run log, summary
+    run_simulation(model, PP, LL)                     # sweeps, measurement file, checkpoints, run log, summary
 
 
 if __name__ == '__main__':

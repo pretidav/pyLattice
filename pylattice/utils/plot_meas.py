@@ -1,19 +1,24 @@
-"""Prints and plots the measurements of a run, offline: reads the meas.json that the run wrote
-(pylattice.core.callbacks.MeasurementFile) and needs no MPI processes, no lattice, and not even
-the run to be over (the file is a valid JSON document after every measurement).
+"""Prints and plots the measurements of a run, offline: reads the measurements file that the run wrote
+(<theory>_grid<grid>_mpi<mpigrid>_b<beta>_meas.json, pylattice.core.callbacks.MeasurementFile) and needs no
+MPI processes, no lattice, and not even the run to be over (the file is a valid JSON document after every
+measurement).
 
-    python -m pylattice.utils.plot_meas meas.json
-    python -m pylattice.utils.plot_meas meas.json --skip 200 --outdir figures
-    python -m pylattice.utils.plot_meas meas.json --no-plot
+    python -m pylattice.utils.plot_meas ising_grid20x20_mpi2x2_b1.5_meas.json
+    python -m pylattice.utils.plot_meas ising_grid20x20_mpi2x2_b1.5_meas.json --skip 200 --outdir figures
+    python -m pylattice.utils.plot_meas                                  # the only *_meas*.json of this directory
+    python -m pylattice.utils.plot_meas ising_grid20x20_mpi2x2_b1.5_meas.json --no-plot
 
 It prints, for every observable and for the acceptance, the number of points, the mean and its
 error (batch means, pylattice.core.stats.mean_error) and the integrated autocorrelation time with
 its error (Gamma method, pylattice.core.stats.uwerr); and writes one figure per quantity against
-the sweep, <outdir>/<name>.png, in the style of plot_style.
+the sweep, <outdir>/<run name>_<name>.png (e.g. ising_grid20x20_mpi2x2_b1.5_m.png; the run name is the name of the
+measurements file without .json and _meas), in the style of plot_style.
 """
 import argparse
 import json
+import glob
 import os
+import re
 import sys
 
 import numpy as np
@@ -23,7 +28,7 @@ from pylattice.core.montecarlo import History
 
 
 def load(path):
-    """meas.json -> History. null (a nan or inf of the run) becomes nan."""
+    """measurements file -> History. null (a nan or inf of the run) becomes nan."""
     with open(path) as f:
         records = json.load(f)['measurements']
     history = History()
@@ -31,6 +36,25 @@ def load(path):
         values = {k: (np.nan if v is None else v) for k, v in r.items() if k not in ('sweep', 'acceptance')}
         history.record(r['sweep'], values, r['acceptance'])
     return history
+
+
+def find_measurements(directory='.'):
+    """the measurements file of this directory when none is named: the only *_meas*.json (a run's _meas.json or an offline
+    measurement's _meas_offline.json); a message says what to do when there is none or several"""
+    found = sorted(glob.glob(os.path.join(directory, '*_meas*.json')))
+    if len(found) == 1:
+        return found[0]
+    if not found:
+        raise ValueError("there is no measurements file (*_meas.json) in this directory: give its name")
+    raise ValueError("there are several measurements files ({}): give the name of the one to use".format(
+        ', '.join(os.path.basename(f) for f in found)))
+
+
+def figure_prefix(path):
+    """<run name>_ for the figures of a measurements file: its name without the directory, .json and _meas ('' for a file
+    that is just called meas.json: the figures are then called <name>.png)"""
+    stem = re.sub(r'_?meas(?=_|$)', '', os.path.splitext(os.path.basename(path))[0]).strip('_')
+    return stem + '_' if stem else ''
 
 
 def skip_first(history, skip):
@@ -78,13 +102,19 @@ def format_summary(rows):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='Print and plot the measurements (meas.json) of a run.')
-    parser.add_argument('file', nargs='?', default='meas.json', help='the measurements file')
+    parser = argparse.ArgumentParser(description='Print and plot the measurements of a run (its *_meas.json).')
+    parser.add_argument('file', nargs='?', default=None,
+                        help='the measurements file (default: the only *_meas*.json of the current directory)')
     parser.add_argument('--skip', type=int, default=0, metavar='SWEEPS',
                         help='leave out the measurements of the first SWEEPS sweeps (thermalization)')
     parser.add_argument('--outdir', default='.', help='where the figures go')
     parser.add_argument('--no-plot', action='store_true', help='only print the table')
     args = parser.parse_args(argv)
+    if args.file is None:
+        try:
+            args.file = find_measurements()
+        except ValueError as error:
+            parser.exit(1, '{}: {}\n'.format(parser.prog, error))
 
     try:
         history = load(args.file)
@@ -107,7 +137,8 @@ def main(argv=None):
         from mpi4py import MPI
         os.makedirs(args.outdir, exist_ok=True)
         names = list(history.values) + (['acceptance'] if history.acceptance else [])
-        history.plot(MPI.COMM_SELF, files={n: os.path.join(args.outdir, n + '.png') for n in names})
+        prefix = figure_prefix(args.file)
+        history.plot(MPI.COMM_SELF, files={n: os.path.join(args.outdir, prefix + n + '.png') for n in names})
 
 
 if __name__ == '__main__':

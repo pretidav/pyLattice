@@ -24,12 +24,12 @@ def test_defaults():
     P = Parser([])
     assert P.grid == [4, 4] and P.mpigrid == [1, 2]
     assert P.steps == 100 and P.beta == 0.5 and P.seed == 0
-    assert P.debug is False and P.logfile == 'run.log' and P.progress is False
+    assert P.debug is False and P.logfile is None and P.progress is False            # None: the log file has its default name
     assert type(P.steps) is int and type(P.beta) is float and type(P.seed) is int
     assert P.checkpoint_every == 0 and P.runlog_every == 5                  # checkpoints off; about 20 log lines per run
     assert (P.thermalization, P.measure_every) == (0, 1)
     assert P.args == {'grid': [4, 4], 'mpigrid': [1, 2], 'steps': 100, 'thermalization': 0, 'measure_every': 1, 'beta': 0.5, 'seed': 0,
-                      'checkpoint_every': 0, 'runlog_every': 5, 'start_from': None, 'debug': False, 'logfile': 'run.log',
+                      'checkpoint_every': 0, 'runlog_every': 5, 'start_from': None, 'debug': False, 'logfile': None,
                       'progress': False}
 
 
@@ -45,7 +45,7 @@ def test_all_options_and_both_syntaxes():
     assert P.steps == 5 and P.beta == -0.25 and P.seed == 42 and P.debug and P.logfile == 'my.log' and P.progress
     Q = Parser(['--grid=8x8x8x4', '--mpigrid=1x1x2x2', '--steps=5', '--beta=-0.25', '--seed=42'])
     assert (Q.grid, Q.mpigrid, Q.steps, Q.beta, Q.seed) == (P.grid, P.mpigrid, P.steps, P.beta, P.seed)
-    assert not Q.debug and Q.logfile == 'run.log' and not Q.progress
+    assert not Q.debug and Q.logfile is None and not Q.progress
 
 
 def test_one_dimensional_and_boundary_values():
@@ -101,11 +101,39 @@ def test_the_banner_lists_the_thermalization_and_the_measurement_interval():
     assert rows['thermalization'] == 7 and rows['measure every'] == 3
 
 
+def test_the_files_of_a_run_are_named_after_the_theory_the_lattice_the_ranks_and_beta():
+    P = Parser(['--grid=20x20', '--mpigrid=2x2', '--beta=1.5'], theory='ising')
+    assert P.run_name() == 'ising_grid20x20_mpi2x2_b1.5' and P.checkpoint_prefix() == P.run_name()
+    assert P.log_filename() == 'ising_grid20x20_mpi2x2_b1.5.log' and P.meas_filename() == 'ising_grid20x20_mpi2x2_b1.5_meas.json'
+    assert Parser(['--grid=4x4x8x8', '--mpigrid=2x2x1x1', '--beta=2.3'], theory='su2').run_name() == 'su2_grid4x4x8x8_mpi2x2x1x1_b2.3'
+    assert Parser(['--grid=6', '--mpigrid=4', '--beta=10']).run_name() == 'run_grid6_mpi4_b10'      # no theory: 'run'; beta 10.0 as 10
+    assert Parser(['--beta=0.4406868']).run_name().endswith('_b0.4406868') and Parser(['--beta=-0.25']).run_name().endswith('_b-0.25')
+    assert Parser(['--beta=0']).run_name().endswith('_b0') and Parser([], theory='x').theory == 'x'
+    assert Parser(['--logfile=mine.log'], theory='ising').log_filename() == 'mine.log'              # an explicit name is kept
+    assert Parser(['--logfile=off'], theory='ising').log_filename() is None
+    from pylattice.core.cli import format_beta
+    assert [format_beta(b) for b in (1.5, 10, 10.0, 0.0, 5.7, 1e-05, 123456.0)] == ['1.5', '10', '10', '0', '5.7', '1e-05', '123456']
+
+
+def test_the_offline_measurements_are_named_after_the_run_of_the_checkpoints():
+    from pylattice.core.cli import offline_name
+    run = 'su3_grid4x4x8x8_mpi2x2x1x1_b5.7'
+    files = ['checkpoints/{}_{:08d}.hdf5'.format(run, k) for k in (10, 20, 300)]
+    assert offline_name(files) == run + '_meas_offline'                                         # not the name of the online file
+    assert offline_name(files[:1]) == run + '_meas_offline' and offline_name(['/abs/dir/' + files[0]]) == run + '_meas_offline'
+    assert offline_name(['ising_grid8x8_mpi2x1_b0.4_00000005.hdf5', 'ising_grid8x8_mpi2x1_b0.4_00000007.hdf5']) \
+        == 'ising_grid8x8_mpi2x1_b0.4_meas_offline'
+    mixed = ['a_grid4_mpi1_b1_00000001.hdf5', 'a_grid4_mpi1_b2_00000001.hdf5']                   # two runs: what they share
+    assert offline_name(mixed) == 'a_grid4_mpi1_b_meas_offline'
+    assert offline_name(['x_1.hdf5', 'y_2.hdf5']) == 'measurements_meas_offline' and offline_name(['conf.hdf5']) == 'conf_meas_offline'
+
+
 def test_the_run_log_interval_defaults_to_about_twenty_lines_and_the_logfile_can_be_switched_off():
     assert Parser(['--steps=2000']).runlog_every == 100 and Parser(['--steps=7']).runlog_every == 1
     assert Parser(['--steps=0']).runlog_every == 0 and Parser(['--steps=2000', '--runlog-every=0']).runlog_every == 0
-    assert Parser(['--logfile=off']).logfile is None and Parser(['--logfile=OFF']).logfile is None
-    assert Parser(['--logfile=a/b.log']).logfile == 'a/b.log'
+    assert Parser(['--logfile=off']).log_filename() is None and Parser(['--logfile=OFF']).log_filename() is None
+    assert Parser(['--logfile=off']).logfile is False                                   # off, not just the default name
+    assert Parser(['--logfile=a/b.log']).logfile == 'a/b.log' and Parser(['--logfile=a/b.log']).log_filename() == 'a/b.log'
 
 
 def test_checkpoint_and_runlog_options():
@@ -351,7 +379,8 @@ def test_banner_has_the_logo_and_a_box_for_each_section_on_the_terminal_and_in_t
         for title in ('system', 'parallel', 'lattice', 'run'):
             assert '\u256d\u2500 {} \u2500'.format(title) in shown, title                    # a box with its title
         for needle in ('os ', 'architecture', 'mpi ranks', 'python', 'numpy', 'h5py', 'local grid',
-                       '4x6', 'global lattice', '24 sites', '0.7', '33', 'seed', 'run.log'):
+                       '4x6', 'global lattice', '24 sites', '0.7', '33', 'seed', 'run_grid4x6_mpi1x1_b0.7.log',
+                       'run_grid4x6_mpi1x1_b0.7_meas.json'):                                  # the names of the files of the run
             assert needle in shown, needle
         tops = [l for l in shown.splitlines() if l.startswith('\u256d')]
         bottoms = [l for l in shown.splitlines() if l.startswith('\u2570')]
@@ -359,7 +388,8 @@ def test_banner_has_the_logo_and_a_box_for_each_section_on_the_terminal_and_in_t
     assert '\x1b[' not in on_file and '\x1b[' in raw(c)                                         # color on the terminal only
     sections = dict(run_info(p))
     assert dict(sections['lattice'])['global lattice'].startswith('4x6')
-    assert dict(sections['run'])['log file'] == 'run.log' and dict(sections['run'])['run log every'] == 1
+    assert dict(sections['run'])['log file'] == 'run_grid4x6_mpi1x1_b0.7.log' and dict(sections['run'])['run log every'] == 1
+    assert dict(sections['run'])['measurements'] == 'run_grid4x6_mpi1x1_b0.7_meas.json'
 
 
 def test_show_prints_in_color_on_the_terminal_and_in_plain_text_in_the_file_and_only_on_rank_zero(tmp_path):

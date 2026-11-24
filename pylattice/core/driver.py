@@ -2,10 +2,10 @@
 
     PP = Parser(argv)                                   # the options
     CC = CartesianComm(mpigrid=PP.mpigrid)
-    LL = Logger(debug=PP.debug, logfile=PP.logfile is not None, filename=PP.logfile or 'run.log')
+    LL = Logger(debug=PP.debug, logfile=PP.log_filename() is not None, filename=PP.log_filename() or 'run.log')
     LL.banner(PP, CC.comm)                              # logo and boxes with the system and run information
     ... build the model of the theory (loading PP.start_from if given) ...
-    run_simulation(model, PP, LL, prefix='ising')       # the sweeps, with their logs and files, and the summary
+    run_simulation(model, PP, LL)                       # the sweeps, with their logs and files, and the summary
 
 run_simulation adds the callbacks every run has (the measurement file, the checkpoints if asked, the run log
 lines on the terminal and in the log file), runs the sweeps with pylattice.core.montecarlo, and shows a box
@@ -19,14 +19,19 @@ from pylattice.core.callbacks import Checkpointer, MeasurementFile, RunLog
 from pylattice.core.cli import info_panels
 
 
-def run_simulation(model, parser, logger, prefix, measurement_file='meas.json', callbacks=()):
+def run_simulation(model, parser, logger, prefix=None, measurement_file=None, callbacks=()):
     """Runs parser.steps sweeps of the model, measuring after each, and returns the History.
 
-    parser     the Parser of the run (steps, checkpoint_every, runlog_every, progress, logfile)
+    parser     the Parser of the run (steps, checkpoint_every, runlog_every, progress, logfile); it names the files:
+               <theory>_grid<grid>_mpi<mpigrid>_b<beta> (Parser.run_name) followed by _meas.json for the measurements,
+               _<sweep>.hdf5 for the checkpoints (in ./checkpoints), .log for the log
     logger     the Logger of the run (pylattice.core.cli.Logger)
-    prefix     the checkpoints are written as checkpoints/<prefix>_<sweep>.hdf5
+    prefix     another start of the names of the checkpoints (default: the run name of the parser)
+    measurement_file  another name of the measurements file (default: that of the parser)
     callbacks  more callbacks, after the standard ones
     """
+    measurement_file = measurement_file or parser.meas_filename()
+    prefix = prefix or parser.checkpoint_prefix()
     standard = [MeasurementFile(measurement_file)]                       # every measurement, as soon as it is made
     if parser.checkpoint_every:
         standard.append(Checkpointer(parser.checkpoint_every, directory='checkpoints', prefix=prefix, final=True))
@@ -53,7 +58,7 @@ def run_simulation(model, parser, logger, prefix, measurement_file='meas.json', 
         ('acceptance', '{:.3f}'.format(sum(acceptance) / len(acceptance)) if acceptance else 'n/a'),
         ('measurements', '{}  (print and plot them with: python -m pylattice.utils.plot_meas {})'.format(
             measurement_file, measurement_file)),
-        ('checkpoints', 'checkpoints/' if parser.checkpoint_every else 'off'),
-        ('log file', parser.logfile or 'off'),
+        ('checkpoints', 'checkpoints/{}_<sweep>.hdf5'.format(prefix) if parser.checkpoint_every else 'off'),
+        ('log file', parser.log_filename() or 'off'),
     ])], exact=True)[0])
     return history

@@ -3,7 +3,7 @@ pylattice.core.groups.base it gives the algebra: its dimension and generators, t
 algebra to the group and its inverse, and a random element near the identity (the proposal of a Metropolis
 step). An algebra vector has shape size + (dim,), its group element is exp(i w.T).
 
-Implementation: pylattice.core.groups.su2 (SU2).
+Implementations: pylattice.core.groups.su2 (SU2) and pylattice.core.groups.su (SU(N), the instances SU(3), SU(4), ...).
 """
 from abc import abstractmethod
 

@@ -382,7 +382,8 @@ def test_command_line_driver_with_checkpoints_and_run_log():
             main(argv + ['--runlog-every=3'] + (['--checkpoint-every=3'] if parallel_hdf5() else []))
         cc.comm.Barrier()
         if cc.rank == 0:
-            content = open('run.log', encoding='utf-8').read()
+            name = 'ising_grid{}_mpi{}_b0.5'.format('x'.join(map(str, loc)), 'x'.join(map(str, cc.mpigrid)))   # the name of the run
+            content = open(name + '.log', encoding='utf-8').read()
             lines = [l for l in content.splitlines() if l.startswith('step=')]                 # the lines of the run log
             assert len(lines) == 2                                                             # sweeps 3 and 6 of 7
             keys = [item.split('=')[0] for item in lines[0].split()]
@@ -390,9 +391,10 @@ def test_command_line_driver_with_checkpoints_and_run_log():
             assert 'pyLattice' in content and '\u256d\u2500 system' in content and '\u256d\u2500 done' in content   # one file: boxes, lines, summary
             assert content.index('\u256d\u2500 run') < content.index('step=3') < content.index('\u256d\u2500 done')
             if parallel_hdf5():
-                assert sorted(os.listdir('checkpoints')) == ['ising_00000003.hdf5', 'ising_00000006.hdf5', 'ising_00000007.hdf5']
+                assert sorted(os.listdir('checkpoints')) == [name + '_00000003.hdf5', name + '_00000006.hdf5', name + '_00000007.hdf5']
             else:
                 assert not os.path.exists('checkpoints')
+            assert sorted(f for f in os.listdir('.') if f != 'checkpoints') == [name + '.log', name + '_meas.json']      # every file says the run
         cc.comm.Barrier()
     finally:
         os.chdir(old)
@@ -411,7 +413,7 @@ def test_command_line_driver_draws_the_progress_bar_only_when_asked():
         with quiet() as out:
             main(argv)
         if cc.rank == 0:
-            assert 'MONTE CARLO' in out.getvalue() and not os.path.exists('run.log')              # --logfile=off: no file
+            assert 'MONTE CARLO' in out.getvalue() and not any(f.endswith('.log') for f in os.listdir('.'))   # --logfile=off: no file
     for handler in list(logging.getLogger('pylattice').handlers):
         logging.getLogger('pylattice').removeHandler(handler)
 
@@ -427,8 +429,9 @@ def test_command_line_driver():
             shown = out.getvalue()
             assert '\u256d\u2500 system' in shown and 'step=' in shown and '\u256d\u2500 done' in shown     # boxes, log lines, summary
             assert 'MONTE CARLO' not in shown                                                   # no progress bar unless asked for
-            assert os.path.isfile('run.log') and not any(f.endswith('.png') for f in os.listdir('.'))   # the run plots nothing
-            records = json.load(open('meas.json'))['measurements']                              # written as the run went on
+            name = 'ising_grid{}_mpi{}_b0.5'.format('x'.join(map(str, loc)), 'x'.join(map(str, cc.mpigrid)))
+            assert os.path.isfile(name + '.log') and not any(f.endswith('.png') for f in os.listdir('.'))   # the run plots nothing
+            records = json.load(open(name + '_meas.json'))['measurements']                      # written as the run went on
             assert [r['sweep'] for r in records] == [0, 1, 2, 3, 4] and set(records[1]) == {'sweep', 'm', 'e', 'acceptance'}
             assert records[0]['acceptance'] is None and all(0 <= r['acceptance'] <= 1 for r in records[1:])
     for handler in list(logging.getLogger('pylattice').handlers):                          # the Logger of main()

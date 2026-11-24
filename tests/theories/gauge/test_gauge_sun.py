@@ -1,304 +1,92 @@
-"""SU(2) gauge field (pylattice.theories.gauge.sun): the lattice of links and its updates. The properties of
-the group itself (generators, exponential, quaternions, heat bath) are tested in tests/core/test_sun.py.
-One process (a lattice on a 1x1 rank grid). Run with:  pytest tests/theories/gauge/test_gauge_sun.py
+"""Tests of pylattice.theories.gauge.sun: the SU(N) gauge theory with the Wilson action and the Cabibbo-Marinari sweeps (heat bath,
+Metropolis, overrelaxation), its observables, restart, command line and the offline measurement of its checkpoints. N = 3 mostly,
+and N = 2 (SU(2): the exact heat bath and the reflection are used for it).
+
+Nothing runs a real Monte Carlo: the change of the action of every update is compared with the change of the whole action, and the
+sweeps are checked on a few sweeps of tiny lattices. They run on one process or on a lattice split over 2 or 4 ranks:
+
+    pytest tests/theories/gauge/test_gauge_sun.py
+    mpiexec -n 2 python tests/theories/gauge/test_gauge_sun.py        # 2 ranks (1 or 4 also work)
 """
+import contextlib
+import io
+import json
+import logging
+import os
+import shutil
+import tempfile
+
 import numpy as np
 import pytest
+from mpi4py import MPI
 
-from pylattice.core.groups import su2 as sun
+from pylattice.core import montecarlo
+from pylattice.core.groups import su
 from pylattice.core.parallel import CartesianComm
-from pylattice.theories.gauge.sun import SU2Field
+from pylattice.theories.gauge.field import SU2Field, SUNField, gauge_field, load_links
+from pylattice.theories.gauge.sun import SUNModel, SUNParser, main, plaquette_observables
 
-GRID, ND = [4, 6], 2
-SITES = 4 * 6
-I2 = np.eye(2)
-
-
-def dagger(M):
-    return np.conj(np.swapaxes(M, -1, -2))
+dag = lambda M: np.conj(np.swapaxes(M, -1, -2))
 
 
-def assert_su2(U, tol=1e-12):
-    assert np.abs(U @ dagger(U) - I2).max() < tol and np.abs(np.linalg.det(U) - 1).max() < tol
+# ----------------------------------------------------------------------------- helpers
+def mpigrid_for(dims):
+    size = MPI.COMM_WORLD.Get_size()
+    assert size in (1, 2, 4), 'run with 1, 2 or 4 ranks'
+    return {1: [1] * dims, 2: [2] + [1] * (dims - 1), 4: [2, 2] + [1] * (dims - 2)}[size]
 
 
-def field(rng=None, grid=GRID, nd=ND):
-    return SU2Field(grid=grid, cartesiancomm=CartesianComm(mpigrid=[1] * len(grid)), Nd=nd, rng=rng)
+def setup(G):
+    """communicator and local grid for a global lattice G (every local size must be even)"""
+    mg = mpigrid_for(len(G))
+    return CartesianComm(mpigrid=mg), [g // m for g, m in zip(G, mg)]
 
 
-def link_plaquette_trace(A, mu=0, nu=1):
-    """Re tr of U_mu(x) U_nu(x+mu) U_mu(x+nu)^dagger U_nu(x)^dagger, built with the field's own shifts"""
-    Umu, Unu = A.peek_index(mu), A.peek_index(nu)
-    P = Umu * Unu.shift_forward(mu) * Umu.shift_forward(nu).adj() * Unu.adj()      # built with the lattice operations
-    return P.trace().value.real
+def make(G, N=3, beta=5.5, eps=0.4, hits=1, seed=1, hot=True, algorithm='heatbath', overrelax=0):
+    cc, loc = setup(list(G))
+    rng = cc.rng(seed)
+    field = gauge_field(loc, cc, len(G), N, rng)
+    if hot:
+        field.random_config(rng)
+    return cc, field, SUNModel(field=field, logger=None, beta=beta, eps=eps, hits=hits, rng=rng, algorithm=algorithm,
+                               overrelax=overrelax)
 
 
-def test_gauge_transform_returns_a_new_su2_field_and_keeps_the_original():
-    A = field(np.random.default_rng(3)); A.random_config()
-    before = A.value.copy()
-    B = A.gauge_transform()
-    assert B is not A and isinstance(B, SU2Field) and np.array_equal(A.value, before)
-    assert_su2(B.value) and not np.allclose(B.value, A.value)
+def special_unitary(U, tol=1e-12):
+    N = U.shape[-1]
+    return np.abs(U @ dag(U) - np.eye(N)).max() < tol and np.abs(np.linalg.det(U) - 1).max() < tol
 
 
-def test_gauge_transform_follows_the_definition_on_every_link():
-    A = field(np.random.default_rng(4)); A.random_config()
-    g = A.random_gauge_transformation()
-    B = A.gauge_transform(g)
-    grid = np.array(GRID)
-    for site in range(SITES):
-        x = np.unravel_index(site, GRID)
-        for mu in range(ND):
-            y = list(x); y[mu] = (y[mu] + 1) % grid[mu]
-            ysite = np.ravel_multi_index(y, GRID)
-            expected = g[site] @ A.value[site, mu] @ dagger(g[ysite])
-            assert np.abs(B.value[site, mu] - expected).max() < 1e-12
+def run_name(N, loc, cc, beta):
+    """the start of the name of every file of a run: <theory>_grid<grid>_mpi<mpigrid>_b<beta>"""
+    return 'su{}_grid{}_mpi{}_b{}'.format(N, 'x'.join(map(str, loc)), 'x'.join(map(str, cc.mpigrid)), beta)
 
 
-def test_gauge_transform_leaves_the_plaquette_invariant_but_not_the_links():
-    A = field(np.random.default_rng(5)); A.random_config()
-    B = A.gauge_transform()
-    for mu, nu in ((0, 1), (1, 0)):
-        assert np.abs(link_plaquette_trace(A, mu, nu) - link_plaquette_trace(B, mu, nu)).max() < 1e-12
-    assert np.abs(np.trace(A.value, axis1=-2, axis2=-1) - np.trace(B.value, axis1=-2, axis2=-1)).max() > 1e-3
+def total(cc, x):
+    return cc.comm.allreduce(float(x))
 
 
-def test_gauge_transform_with_identity_or_a_constant_g():
-    A = field(np.random.default_rng(6)); A.random_config()
-    ident = np.broadcast_to(I2, (SITES, 2, 2))
-    assert np.abs(A.gauge_transform(ident).value - A.value).max() < 1e-14
-    h = sun.to_matrix(sun.random_quaternion(np.random.default_rng(7)))
-    B = A.gauge_transform(np.broadcast_to(h, (SITES, 2, 2)))                     # global: a conjugation
-    assert np.abs(B.value - h @ A.value @ dagger(h)).max() < 1e-12
+@contextlib.contextmanager
+def quiet():
+    with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()):
+        yield out
 
 
-def test_gauge_transform_inverse_and_composition_and_cold_field():
-    A = field(np.random.default_rng(8)); A.random_config()
-    g, h = A.random_gauge_transformation(), A.random_gauge_transformation()
-    assert np.abs(A.gauge_transform(g).gauge_transform(dagger(g)).value - A.value).max() < 1e-12
-    assert np.abs(A.gauge_transform(g).gauge_transform(h).value - A.gauge_transform(h @ g).value).max() < 1e-12
-    C = field()                                                                  # cold: U' = g(x) g(x+mu)^dagger
-    assert_su2(C.gauge_transform(g).value)
-
-
-def test_gauge_transform_rejects_a_wrong_shape_and_is_reproducible_with_a_seed():
-    A = field(np.random.default_rng(9)); A.random_config()
-    with pytest.raises(ValueError):
-        A.gauge_transform(np.zeros((SITES, 3, 3)))
-    assert np.array_equal(A.gauge_transform(rng=np.random.default_rng(1)).value,
-                          A.gauge_transform(rng=np.random.default_rng(1)).value)
-
-
-def test_shape_dtype_and_cold_start():
-    A = field()
-    assert A.value.shape == (SITES, ND, 2, 2) and A.value.dtype == np.complex128
-    assert (A.N, A.Nd, A.adj_dim) == (2, ND, 3)
-    assert np.array_equal(A.value, np.broadcast_to(I2, A.value.shape))          # every link the identity
-    assert np.array_equal(A.trivial_config(), A.value)
-
-
-def test_random_config_is_su2_on_every_link_and_haar_distributed():
-    A = field(np.random.default_rng(1), grid=[40, 40], nd=4)                    # 6400 links
-    A.random_config()
-    assert_su2(A.value)
-    q = sun.to_quaternion(A.value.reshape(-1, 2, 2))
-    assert np.abs(q.mean(axis=0)).max() < 0.04 and np.abs(q.T @ q / len(q) - np.eye(4) / 4).max() < 0.03
-    assert np.abs(np.linalg.det(A.value) - 1).max() < 1e-12
-
-
-def test_random_config_uses_its_generator_not_the_global_state():
-    a, b, c = (field(np.random.default_rng(s)) for s in (5, 5, 6))
-    np.random.seed(0)
-    a.random_config()
-    np.random.seed(123)                                                         # the global numpy state does not matter
-    b.random_config()
-    c.random_config()
-    assert np.array_equal(a.value, b.value) and not np.array_equal(a.value, c.value)
-    a.random_config(np.random.default_rng(9))                                    # a generator given to the call is used instead
-    d = field()
-    d.random_config(np.random.default_rng(9))
-    assert np.array_equal(a.value, d.value)
-    assert not np.array_equal(a.value[:, 0], a.value[:, 1])                      # the directions are independent
-
-
-def test_the_default_generator_is_the_stream_of_the_rank_and_goes_on():
-    a, b = field(), field()
-    a.random_config()
-    b.random_config()
-    assert np.array_equal(a.value, b.value)                                      # the same default seed
-    a.random_config()
-    assert not np.array_equal(a.value, b.value)                                  # the second call continues the stream, it does not restart it
-
-
-def test_products_and_adjoints_of_fields_of_links_are_su2():
-    A, B = field(np.random.default_rng(2)), field(np.random.default_rng(3))
-    A.random_config()
-    B.random_config()
-    assert np.abs(A.det().value - 1).max() < 1e-6 and np.abs((A * B).det().value - 1).max() < 1e-6
-    assert np.abs((A.adj() * A).value - I2).max() < 1e-6 and np.abs((A * A.adj()).value - I2).max() < 1e-6
-    assert_su2((A * B).value, 1e-6)                                              # the lattice product is the matrix product
-
-
-def test_unitarize_brings_a_perturbed_field_back_to_the_nearest_su2():
-    rng = np.random.default_rng(4)
-    A = field(rng)
-    A.random_config()
-    exact = A.value.copy()
-    noise = 1e-3 * (rng.standard_normal(A.value.shape) + 1j * rng.standard_normal(A.value.shape))
-    A.value = exact + noise
-    A.unitarize()
-    assert_su2(A.value)
-    assert np.abs(A.value - exact).max() < 5e-3                                  # each link stays next to where it was: not replaced by another
-    before = A.value.copy()
-    A.unitarize()
-    assert np.abs(A.value - before).max() < 1e-13                                # nothing to do on SU(2)
-
-
-def test_unitarize_of_a_strongly_perturbed_field_is_still_su2():
-    rng = np.random.default_rng(5)
-    A = field(rng)
-    A.random_config()
-    A.value += rng.random(A.value.shape) + 1j * rng.random(A.value.shape)
-    A.unitarize()
-    assert_su2(A.value)
-
-
-def test_unitarize_removes_the_rounding_errors_of_many_updates():
-    A = field(np.random.default_rng(6))
-    A.random_config()
-    for _ in range(200):
-        A.metropolis_update(eps=0.05)
-        A.value = (A.value * (1 + 1e-6)).astype(np.complex128)                    # a slow drift away from SU(2)
-    assert np.abs(np.linalg.det(A.value) - 1).max() > 1e-5
-    A.unitarize()
-    assert_su2(A.value)
-
-
-def test_metropolis_update_is_a_small_step_that_keeps_su2():
-    A = field(np.random.default_rng(7))
-    A.random_config()
-    before = A.value.copy()
-    A.metropolis_update(eps=0.01)
-    assert_su2(A.value)
-    # X U with X at distance eps from the identity: ||X - 1||_F^2 = 4 (1 - a0) = 4 (1 - sqrt(1 - eps^2))
-    step = np.linalg.norm((A.value - before).reshape(-1, 4), axis=1)
-    assert np.abs(step - np.sqrt(4 * (1 - np.sqrt(1 - 0.01 ** 2)))).max() < 1e-10
-    assert (step > 0).all()
-
-
-def test_metropolis_update_with_zero_eps_changes_nothing_and_default_eps_is_small():
-    A = field(np.random.default_rng(8))
-    A.random_config()
-    before = A.value.copy()
-    A.metropolis_update(eps=0.0)
-    assert np.abs(A.value - before).max() < 1e-15
-    A.metropolis_update()                                                        # the default eps, 0.001
-    assert 0 < np.abs(A.value - before).max() < 0.01
-    with pytest.raises(ValueError):
-        A.metropolis_update(eps=2.0)
-
-
-def test_metropolis_update_is_a_random_walk_that_explores_the_group():
-    A = field(np.random.default_rng(9), grid=[20, 20], nd=2)
-    start = A.value.copy()                                                       # cold
-    for _ in range(400):
-        A.metropolis_update(eps=0.3)
-    assert_su2(A.value)
-    a0 = sun.to_quaternion(A.value.reshape(-1, 2, 2))[:, 0]
-    assert abs(np.mean(a0)) < 0.2 and np.std(a0) > 0.3                           # it has left the identity: spread over the group
-    assert np.abs(A.value - start).max() > 0.5
-
-
-def test_metropolis_update_follows_the_generator_and_is_independent_per_link():
-    a, b = field(np.random.default_rng(10)), field(np.random.default_rng(10))
-    a.metropolis_update(eps=0.1)
-    b.metropolis_update(eps=0.1)
-    assert np.array_equal(a.value, b.value)
-    c = field(np.random.default_rng(11))
-    c.metropolis_update(eps=0.1)
-    assert not np.array_equal(a.value, c.value)
-    flat = a.value.reshape(-1, 4)
-    assert len({tuple(np.round(x, 12)) for x in flat}) == len(flat)              # every link its own step
-    d = field()
-    d.metropolis_update(eps=0.1, rng=np.random.default_rng(10))                  # a generator given to the call
-    assert np.array_equal(d.value, a.value)
-
-
-def test_tepid_vector_is_a_unit_quaternion_at_distance_eps_from_the_identity():
-    A = field(np.random.default_rng(12))
-    q = A.tepid_lie_algebra_vector(0.2)
-    assert q.shape == (4,) and abs(np.linalg.norm(q) - 1) < 1e-14
-    assert abs(np.linalg.norm(q[1:]) - 0.2) < 1e-14 and q[0] > 0                 # near +1, not near -1 (the centre)
-
-
-def test_the_lattice_shifts_keep_the_links_in_su2():
-    A = field(np.random.default_rng(13))
-    A.random_config()
-    before = A.value.copy()
-    A.moveforward(mu=0)
-    assert_su2(A.value) and A.value.dtype == np.complex128
-    A.movebackward(mu=0)
-    assert np.abs(A.value - before).max() < 1e-12                                # forward then backward is the identity
-
-
-def brute_plaquette(A, mu, nu, site):
-    G = tuple(int(g) for g in A.grid)
-    x = np.unravel_index(site, G)
-    idx = lambda d, k=1: np.ravel_multi_index([(x[i] + (k if i == d else 0)) % G[i] for i in range(len(G))], G)
-    U = A.value
-    return U[site, mu] @ U[idx(mu), nu] @ dagger(U[idx(nu), mu]) @ dagger(U[site, nu])
-
-
-def test_cold_field_has_plaquette_one_and_action_zero():
-    A = field(nd=3, grid=[4, 4, 4])
-    assert abs(A.Plaq() - 1) < 1e-14 and abs(A.Action(2.3)) < 1e-12 and isinstance(A.Plaq(), complex)
-    assert np.abs(A.Staple(1).value - 4 * I2).max() < 1e-14                              # 2 (Nd-1) staples, each the identity
-
-
-def test_plaquette_field_matches_a_site_by_site_product():
-    A = field(np.random.default_rng(11)); A.random_config()
-    P = A.Plaquette_field(0, 1).value
-    for site in range(SITES):
-        assert np.abs(P[site] - brute_plaquette(A, 0, 1, site)).max() < 1e-12
-    assert_su2(P)
-
-
-def test_plaq_and_action_follow_their_definition_in_3d():
-    A = field(np.random.default_rng(12), grid=[3, 4, 5], nd=3); A.random_config()
-    n = 3 * 4 * 5
-    vals = [0.5 * np.trace(brute_plaquette(A, mu, nu, s)).real for mu in range(3) for nu in range(mu + 1, 3) for s in range(n)]
-    assert abs(A.Plaq() - np.mean(vals)) < 1e-12 and len(vals) == 3 * n and abs(A.Plaq().imag) < 1e-12
-    assert abs(A.Action(2.0) - 2.0 * (len(vals) - sum(vals))) < 1e-10
-    assert -1 <= A.Plaq().real <= 1 and A.Action(2.0) >= 0
-
-
-def test_staple_contracted_with_the_links_gives_four_times_the_plaquettes():
-    A = field(np.random.default_rng(13), grid=[4, 4, 4], nd=3); A.random_config()
-    link_sum = sum(np.trace(A.value[:, mu] @ A.Staple(mu).value, axis1=-2, axis2=-1).real.sum() for mu in range(3))
-    plaq_sum = sum(np.trace(A.Plaquette_field(mu, nu).value, axis1=-2, axis2=-1).real.sum() for mu in range(3) for nu in range(mu + 1, 3))
-    assert abs(link_sum - 4 * plaq_sum) < 1e-9
-
-
-def test_staple_is_a_sum_of_su2_products_and_checks_the_direction():
-    A = field(np.random.default_rng(14)); A.random_config()
-    S = A.Staple(0).value                                                                 # Nd=2: 2 staples, each in SU(2)
-    assert S.shape == (SITES, 2, 2) and np.linalg.norm(S, axis=(-2, -1)).max() <= 2 * np.sqrt(2) + 1e-12
-    with pytest.raises(ValueError):
-        A.Staple(2)
-    with pytest.raises(ValueError):
-        A.Plaquette_field(1, 1)
-    with pytest.raises(ValueError):
-        field(nd=1).Plaq()
-
-
-def test_plaq_action_and_staple_energy_are_gauge_invariant():
-    A = field(np.random.default_rng(15), grid=[4, 4, 4], nd=3); A.random_config()
-    B = A.gauge_transform()
-    assert abs(A.Plaq() - B.Plaq()) < 1e-12 and abs(A.Action(2.2) - B.Action(2.2)) < 1e-9
-    for mu in range(3):                                                             # the staple itself is covariant: S' = g(x+mu...)
-        ea = np.trace(A.value[:, mu] @ A.Staple(mu).value, axis1=-2, axis2=-1).real
-        eb = np.trace(B.value[:, mu] @ B.Staple(mu).value, axis1=-2, axis2=-1).real
-        assert np.abs(ea - eb).max() < 1e-12
+@contextlib.contextmanager
+def shared_tempdir():
+    comm = MPI.COMM_WORLD
+    path = comm.bcast(tempfile.mkdtemp() if comm.Get_rank() == 0 else None, root=0)
+    old = os.getcwd()
+    os.chdir(path)
+    try:
+        yield path
+    finally:
+        os.chdir(old)
+        for handler in list(logging.getLogger('pylattice').handlers):
+            logging.getLogger('pylattice').removeHandler(handler)
+        comm.Barrier()
+        if comm.Get_rank() == 0:
+            shutil.rmtree(path, ignore_errors=True)               # the directory this test made with mkdtemp
 
 
 def parallel_hdf5():
@@ -309,25 +97,413 @@ def parallel_hdf5():
         return False
 
 
-needs_hdf5 = pytest.mark.skipif(not parallel_hdf5(), reason='h5py with parallel HDF5 is not installed')
+def needs_hdf5(f):
+    f.needs_hdf5 = True                                  # the script runner below skips it too
+    return pytest.mark.skipif(not parallel_hdf5(), reason='h5py with parallel HDF5 is not installed')(f)
+
+
+# ----------------------------------------------------------------------------- the change of the action
+@pytest.mark.parametrize('G,N', [([8, 4], 3), ([4, 4, 4], 3), ([8, 4], 4), ([8, 4], 2)])
+def test_the_action_change_of_a_link_update_is_that_of_the_whole_action(G, N):
+    # all the links of one direction on the sites of one parity are replaced at once: they share no plaquette, so the change of the
+    # whole action is the sum of the changes each one reports (with the factor beta / N of SU(N))
+    beta = 4.3
+    cc, field, model = make(G, N=N, beta=beta, eps=0.8)
+    rng = cc.rng(5)
+    for mu in range(len(G)):
+        for parity in (model.even, model.odd):
+            staple = field.Staple(mu)
+            link = field.peek_index(mu)
+            proposed = model.proposal(link, rng)
+            change = model.link_action_change(link, proposed, staple).value
+            before = field.Action(beta)
+            kept = field.value[:, mu].copy()
+            link.value = np.where(parity[:, None, None], proposed.value, link.value)
+            field.poke_index(mu, link)
+            expected = total(cc, change[parity].sum())
+            assert abs((field.Action(beta) - before) - expected) < 1e-9, (mu, N)
+            assert abs(expected) > 1e-3                                              # a real change, not zero against zero
+            field.value[:, mu] = kept
+
+
+def test_updating_the_two_parities_together_would_not_be_independent():
+    # the reason for the checkerboard: neighbouring links of one direction share a plaquette
+    beta = 4.3
+    cc, field, model = make([8, 4], beta=beta, eps=0.8)
+    staple, link = field.Staple(0), field.peek_index(0)
+    proposed = model.proposal(link, cc.rng(6))
+    summed = total(cc, model.link_action_change(link, proposed, staple).value.sum())
+    before = field.Action(beta)
+    field.poke_index(0, proposed)
+    assert abs((field.Action(beta) - before) - summed) > 1e-3
+
+
+def test_a_metropolis_sweep_changes_the_action_by_the_sum_of_the_accepted_changes():
+    # no statistics: over one sweep the action changes by exactly the sum of the changes of the accepted links, which holds only with
+    # the checkerboard and the right staples, sign and factor beta / N
+    beta = 5.0
+    for G, hits, N in (([8, 4], 1, 3), ([4, 4, 4], 2, 3), ([8, 4], 1, 2)):
+        cc, field, model = make(G, N=N, beta=beta, eps=0.5, hits=hits, algorithm='metropolis')
+        seen, original, accept_of = [], model.link_action_change, montecarlo.metropolis_accept
+
+        def spy_change(link, proposed, staple):
+            change = original(link, proposed, staple)
+            seen.append([change.value.copy(), None])
+            return change
+
+        def spy_accept(delta, rng):
+            accept = accept_of(delta, rng)
+            seen[-1][1] = accept
+            return accept
+
+        model.link_action_change = spy_change
+        montecarlo.metropolis_accept = spy_accept
+        try:
+            before = field.Action(beta)
+            accepted, attempted = model.sweep()
+            after = field.Action(beta)
+        finally:
+            montecarlo.metropolis_accept = accept_of
+        assert len(seen) == len(G) * 2 * hits
+        parities = [model.even, model.odd] * len(G)
+        expected = sum(change[accept & parities[k // hits]].sum() for k, (change, accept) in enumerate(seen))
+        assert 0 < total(cc, accepted) < total(cc, attempted)
+        assert abs((after - before) - total(cc, expected)) < 1e-8, (G, after - before, total(cc, expected))
+
+
+# ----------------------------------------------------------------------------- overrelaxation and heat bath
+@pytest.mark.parametrize('G,N', [([8, 4], 3), ([4, 4, 4], 3), ([8, 4], 4), ([8, 4], 2)])
+def test_overrelaxation_leaves_the_action_unchanged_and_moves_only_its_links(G, N):
+    cc, field, model = make(G, N=N, beta=3.1)
+    before = field.Action(3.1)
+    for mu in range(len(G)):
+        for parity in (model.even, model.odd):
+            once = field.value.copy()
+            model.overrelaxation_update(mu, parity)
+            assert abs(field.Action(3.1) - before) < 1e-9                             # the action does not change
+            assert special_unitary(field.value, 1e-11)
+            changed = np.abs(field.value[:, mu] - once[:, mu]).max(axis=(-1, -2)) > 1e-8
+            assert changed[parity].mean() > 0.9 and not changed[~parity].any()        # the links of its parity only
+            assert all(np.array_equal(field.value[:, d], once[:, d]) for d in range(len(G)) if d != mu)
+
+
+def test_the_su2_overrelaxation_of_the_model_is_its_own_inverse():
+    # for N = 2 there is one subgroup, so applying the update twice gives the links back (for N >= 3 it is a sequence of subgroup
+    # steps, each its own inverse but not the sequence)
+    cc, field, model = make([8, 4], N=2, beta=2.3)
+    for mu in range(2):
+        for parity in (model.even, model.odd):
+            once = field.value.copy()
+            model.overrelaxation_update(mu, parity)
+            assert np.abs(field.value - once).max() > 1e-3
+            model.overrelaxation_update(mu, parity)
+            assert np.abs(field.value - once).max() < 1e-12
+            model.overrelaxation_update(mu, parity)                                    # go on from the changed one
+
+
+def test_overrelaxation_of_the_su2_model_is_the_subgroup_step_of_su():
+    cc, field, model = make([8, 4], N=2)
+    staple, link = field.Staple(1).value, field.value[:, 1].copy()
+    model.overrelaxation_update(1, model.even | model.odd)
+    assert np.abs(field.value[:, 1] - su.cabibbo_marinari_overrelax_link(link, staple)).max() < 1e-12
+
+
+@pytest.mark.parametrize('N', [2, 3, 4])
+def test_heat_bath_updates_only_its_links_counts_them_and_aligns_them_with_the_staple_at_large_beta(N):
+    cc, field, model = make([8, 4, 4], N=N, beta=100.0 * N)                         # beta / N = 100: sharp conditional weight
+    for mu in range(3):
+        for parity in (model.even, model.odd):
+            before = field.value.copy()
+            staple = field.Staple(mu).value
+            assert model.heatbath_update(mu, parity, cc.rng(1)) == int(parity.sum())
+            assert special_unitary(field.value)
+            assert np.array_equal(field.value[~parity], before[~parity])           # the other sites keep their links
+            best = np.linalg.svd(staple, compute_uv=False).sum(axis=-1)             # max over SU(N) of Re tr(U S), at most
+            alignment = np.trace(field.value[:, mu] @ staple, axis1=-2, axis2=-1).real / best
+            assert total(cc, alignment[parity].sum()) / total(cc, parity.sum()) > 0.8     # a random link gives about 0
+
+
+@pytest.mark.parametrize('N', [3, 4])
+def test_the_heat_bath_uses_the_weight_exp_beta_over_n_re_tr_u_s_of_the_action(N):
+    # the link weight from the Wilson action S = beta sum (1 - Re tr P / N) is exp((beta / N) Re tr(U S)) (the action-change test
+    # above fixes this factor): the coupling given to the Cabibbo-Marinari step must be beta / N, and the staple the field's
+    from pylattice.theories.gauge import sun as theory
+    beta = 4.6
+    cc, field, model = make([8, 4], N=N, beta=beta)
+    seen, original = [], theory.su.cabibbo_marinari_link
+
+    def spy(U, V, c, rng=None, subgroups=None):
+        seen.append((c, V.copy()))
+        return original(U, V, c, rng, subgroups)
+
+    theory.su.cabibbo_marinari_link = spy
+    try:
+        staple = field.Staple(0).value.copy()
+        model.heatbath_update(0, model.even, cc.rng(2))
+    finally:
+        theory.su.cabibbo_marinari_link = original
+    assert len(seen) == 1 and seen[0][0] == pytest.approx(beta / N) and np.array_equal(seen[0][1], staple)
+
+
+@pytest.mark.parametrize('N,eps', [(2, 0.3), (3, 0.3), (4, 0.7), (3, 1.0)])
+def test_the_metropolis_proposal_is_at_the_distance_eps_from_the_identity(N, eps):
+    cc, field, model = make([8, 4], N=N, eps=eps, hot=False)                         # cold: every link is the identity
+    X = model.proposal(field.peek_index(0), cc.rng(3)).value                          # so the proposal is X itself
+    assert special_unitary(X) and X.shape == (int(np.prod(field.grid)), N, N)
+    assert np.abs(np.linalg.norm(su.log_algebra(X), axis=-1) - 2 * np.arcsin(eps)).max() < 1e-8
+    assert np.abs(su.log_algebra(X)).max() > 0
+
+
+@pytest.mark.parametrize('N,algorithm,overrelax', [(3, 'heatbath', 0), (3, 'heatbath', 2), (3, 'metropolis', 0), (3, 'metropolis', 2),
+                                                   (4, 'heatbath', 1), (2, 'heatbath', 0), (2, 'heatbath', 2), (2, 'metropolis', 0),
+                                                   (2, 'metropolis', 2)])
+def test_every_algorithm_sweeps_keep_su_n_count_and_reproduce(N, algorithm, overrelax):
+    def run(seed):
+        cc, field, model = make([8, 4], N=N, beta=5.0, algorithm=algorithm, overrelax=overrelax, seed=seed)
+        counts = [model.sweep() for _ in range(2)]
+        assert special_unitary(field.value)
+        return field.value.copy(), counts, int(np.prod(field.grid))
+    links, counts, sites = run(3)
+    assert np.array_equal(links, run(3)[0]) and not np.array_equal(links, run(4)[0])
+    for accepted, attempted in counts:
+        assert attempted == 2 * sites                                                  # Nd sites, one proposal per link
+        assert (accepted == attempted) if algorithm == 'heatbath' else (0 < accepted < attempted)
+    cc, field, model = make([4, 4], N=N, beta=0.0, algorithm='heatbath')               # beta = 0: the Haar measure
+    model.sweep()
+    assert special_unitary(field.value)
+
+
+@pytest.mark.parametrize('N', [2, 3])
+def test_a_cold_start_at_large_beta_stays_ordered_and_a_hot_start_at_beta_zero_stays_disordered(N):
+    cc, field, model = make([4, 4], N=N, beta=60.0, eps=0.1, hot=False, algorithm='metropolis')
+    for _ in range(3):
+        model.sweep()
+    assert model.observables()['plaq_re'] > 0.9
+    cc, field, model = make([4, 4, 4], N=N, beta=0.0, hot=True)
+    for _ in range(3):
+        model.sweep()
+    assert abs(model.observables()['plaq_re']) < 0.2
+
+
+@pytest.mark.parametrize('N,beta', [(2, 2.3), (3, 5.7)])
+def test_a_small_proposal_is_almost_always_accepted_and_a_large_one_much_less(N, beta):
+    for eps, low, high in ((0.02, 0.9, 1.0), (1.0, 0.0, 0.4)):
+        cc, field, model = make([8, 4], N=N, beta=beta, eps=eps, algorithm='metropolis')
+        for _ in range(5):
+            model.sweep()                                                              # let the links settle
+        a = t = 0
+        for _ in range(3):
+            x, y = model.sweep()
+            a, t = a + x, t + y
+        assert low <= total(cc, a) / total(cc, t) <= high, (N, eps)
+
+
+@pytest.mark.parametrize('N', [2, 3])
+def test_at_beta_zero_every_metropolis_proposal_is_accepted_and_the_links_become_random(N):
+    cc, field, model = make([8, 4, 4], N=N, beta=0.0, eps=0.9, hot=False, algorithm='metropolis')
+    accepted = attempted = 0
+    for _ in range(20):
+        a, t = model.sweep()
+        accepted, attempted = accepted + a, attempted + t
+    assert accepted == attempted                                                       # dS = 0
+    o = model.observables()
+    assert abs(o['plaq_re']) < 0.15 and o['plaq_re'] != 1.0 and o['action'] == 0.0     # from the cold start 1 to about 0
+
+
+# ----------------------------------------------------------------------------- observables and arguments
+@pytest.mark.parametrize('N', [2, 3])
+def test_observables_of_the_cold_start_and_their_identities(N):
+    cc, field, model = make([8, 4, 4], N=N, beta=5.7, hot=False)
+    assert model.observables() == {'plaq_re': 1.0, 'plaq_im': 0.0, 'action': 0.0}
+    for _ in range(3):
+        model.sweep()
+    o = model.observables()
+    assert set(o) == {'plaq_re', 'plaq_im', 'action'} and all(type(v) is float for v in o.values())
+    assert abs(o['plaq_im']) < 1e-12 and 0 < o['plaq_re'] < 1
+    assert abs(o['action'] - 5.7 * 3 * (1 - o['plaq_re'])) < 1e-9                      # the action per site: 3 planes in 3 dimensions
+    assert plaquette_observables(field, 5.7) == o
+
+
+def test_the_model_checks_its_arguments_and_takes_n_from_the_field():
+    cc, loc = setup([8, 4])
+    field = gauge_field(loc, cc, 2, 3)
+    for kwargs in (dict(beta=float('nan')), dict(beta=-1.0), dict(beta=1.0, eps=0.0), dict(beta=1.0, eps=1.5),
+                   dict(beta=1.0, hits=0), dict(beta=1.0, algorithm='gibbs'), dict(beta=1.0, overrelax=-1)):
+        with pytest.raises(ValueError):
+            SUNModel(field=field, logger=None, **kwargs)
+    assert SUNModel(field=field, logger=None, beta=1.0).N == 3 and SUNModel(field=gauge_field(loc, cc, 2, 2), logger=None, beta=1.0).N == 2
+    assert isinstance(gauge_field(loc, cc, 2, 2), SU2Field) and type(gauge_field(loc, cc, 2, 3)) is SUNField
+    if MPI.COMM_WORLD.Get_size() == 1:
+        with pytest.raises(ValueError, match='checkerboard'):
+            SUNModel(field=gauge_field([3, 4], CartesianComm(mpigrid=[1, 1]), 2, 3), logger=None, beta=1.0)
+
+
+# ----------------------------------------------------------------------------- restart
+@needs_hdf5
+@pytest.mark.parametrize('N', [2, 3])
+def test_load_links_gives_back_the_saved_links_and_refuses_what_is_not_su_n(N):
+    from pylattice.core.hdf5io import Writer
+    cc, field, _ = make([8, 4], N=N)
+    other = 5 - N                                                                      # the other number of colors: 3 for 2, 2 for 3
+    with shared_tempdir() as d:
+        path = os.path.join(d, 'conf.hdf5')
+        Writer(lattice=field, cartesiancomm=cc).write(path)
+        new, lines = gauge_field(field.grid, cc, 2, N), []
+        load_links(new, path, log=lines.append)                                        # a plain Writer file has no step
+        assert np.array_equal(new.value, field.value) and 'SU({})'.format(N) in '\n'.join(lines)
+        bad = gauge_field(field.grid, cc, 2, N)
+        bad.value = bad.value * 1.5                                                    # unitarity broken
+        Writer(lattice=bad, cartesiancomm=cc).write(os.path.join(d, 'bad.hdf5'))
+        target = gauge_field(field.grid, cc, 2, N)
+        with pytest.raises(ValueError, match='not an SU\\({}\\) configuration'.format(N)):
+            load_links(target, os.path.join(d, 'bad.hdf5'))
+        assert np.array_equal(target.value, gauge_field(field.grid, cc, 2, N).value)    # untouched
+        with pytest.raises(ValueError):                                                # a field of another N does not fit the file
+            load_links(gauge_field(field.grid, cc, 2, other), path)
 
 
 @needs_hdf5
-def test_a_checkpoint_of_the_links_keeps_double_precision(tmp_path):
+@pytest.mark.parametrize('N', [2, 3])
+def test_a_restart_continues_the_run_exactly(N):
     import h5py
+    cc, loc = setup([8, 4])
+    base = ['--nc={}'.format(N), '--grid=' + 'x'.join(map(str, loc)), '--mpigrid=' + 'x'.join(map(str, cc.mpigrid)), '--beta=5.5',
+            '--seed=4', '--init=hot', '--overrelax=1', '--logfile=off']
+
+    def last(directory):
+        path = os.path.join(directory, sorted(os.listdir(directory))[-1])
+        with h5py.File(path, 'r') as f:
+            return f['value'][...]
+
+    with shared_tempdir() as d:
+        if cc.rank == 0:
+            for name in ('straight', 'split', 'second'):
+                os.makedirs(os.path.join(d, name))
+        MPI.COMM_WORLD.Barrier()
+        os.chdir(os.path.join(d, 'straight'))
+        with quiet():
+            main(base + ['--steps=6', '--checkpoint-every=6'])
+        MPI.COMM_WORLD.Barrier()
+        straight = last('checkpoints') if cc.rank == 0 else None
+        os.chdir(os.path.join(d, 'split'))
+        with quiet():
+            main(base + ['--steps=3', '--checkpoint-every=3'])
+        MPI.COMM_WORLD.Barrier()
+        name = run_name(N, loc, cc, '5.5')
+        first = os.path.abspath(os.path.join('checkpoints', name + '_00000003.hdf5'))        # named after the run
+        os.chdir(os.path.join(d, 'second'))
+        with quiet():
+            main(base + ['--steps=3', '--checkpoint-every=3', '--start-from=' + first])
+        MPI.COMM_WORLD.Barrier()
+        if cc.rank == 0:
+            assert np.array_equal(last('checkpoints'), straight)                       # bit for bit
+
+
+# ----------------------------------------------------------------------------- command line
+def test_the_parser_defaults_options_and_errors():
+    P = SUNParser([])
+    assert (P.N, P.grid, P.mpigrid, P.beta, P.algorithm, P.overrelax, P.init) == (3, [4, 4, 4, 4], [1, 1, 1, 2], 5.7, 'heatbath', 0, 'cold')
+    assert SUNParser(['--nc=2']).beta == 2.3 and SUNParser(['--nc=2', '--beta=2.5']).beta == 2.5          # the default beta follows N
+    assert SUNParser(['--nc=4', '--beta=10.0']).beta == 10.0 and SUNParser(['--nc=4', '--beta=10.0']).args['beta'] == 10.0
+    Q = SUNParser(['--nc=4', '--beta=10', '--grid=6x6', '--mpigrid=1x1', '--algorithm=metropolis', '--eps=0.2', '--hits=2', '--overrelax=3'])
+    assert (Q.N, Q.algorithm, Q.eps, Q.hits, Q.overrelax) == (4, 'metropolis', 0.2, 2, 3)
+    assert dict(Q.extra_info()) == {'gauge group': 'SU(4)', 'algorithm': 'metropolis', 'overrelaxation sweeps': 3,
+                                    'proposal eps': 0.2, 'hits per link': 2, 'init': 'cold'}
+    assert 'proposal eps' not in dict(P.extra_info()) and dict(P.extra_info())['gauge group'] == 'SU(3)'
+    for argv in (['--nc=1'], ['--nc=x'], ['--eps=2'], ['--hits=0'], ['--overrelax=-1'], ['--algorithm=gibbs'], ['--grid=4x4', '--mpigrid=1x1x2'],
+                 ['--nc=4'], ['--nc=5', '--steps=3']):                                  # N >= 4 needs --beta
+        with pytest.raises(SystemExit) as exc:
+            SUNParser(argv)
+        assert exc.value.code == 2
+
+
+@pytest.mark.parametrize('N', [2, 3])
+def test_command_line_driver_writes_the_measurements_the_log_and_the_summary(N):
+    cc, loc = setup([4, 4])
+    argv = ['--nc={}'.format(N), '--grid=' + 'x'.join(map(str, loc)), '--mpigrid=' + 'x'.join(map(str, cc.mpigrid)), '--steps=6',
+            '--thermalization=2', '--measure-every=2', '--beta=5.5', '--overrelax=1', '--seed=3', '--runlog-every=4']
+    with shared_tempdir():
+        with quiet() as out:
+            main(argv)
+        if cc.rank == 0:
+            name = run_name(N, loc, cc, '5.5')
+            records = json.load(open(name + '_meas.json'))['measurements']
+            assert [r['sweep'] for r in records] == [0, 2, 4, 6]
+            assert set(records[1]) == {'sweep', 'plaq_re', 'plaq_im', 'action', 'acceptance'}
+            assert records[0]['acceptance'] is None and all(r['acceptance'] == 1.0 for r in records[1:])      # the heat bath
+            assert all(abs(r['plaq_im']) < 1e-12 and 0 < r['plaq_re'] < 1 for r in records)
+            content = open(name + '.log', encoding='utf-8').read()
+            assert sorted(os.listdir('.')) == [name + '.log', name + '_meas.json']                  # every file says the run
+            assert [l.split()[0] for l in content.splitlines() if l.startswith('step=')] == ['step=4', 'step=8']
+            assert 'SU({})'.format(N) in content and 'gauge group' in content and '╭─ done' in content
+            assert 'SU({})'.format(N) in out.getvalue()
+
+
+# ----------------------------------------------------------------------------- the offline measurements
+@needs_hdf5
+def test_stored_su3_configurations_are_measured_with_the_number_of_colors_read_from_the_files():
     from pylattice.core.callbacks import Checkpointer
-    from pylattice.core.hdf5io import load_into
-    A = field(np.random.default_rng(14))
-    A.random_config()
-    A.metropolis_update(eps=0.2)
-    path = Checkpointer(1, directory=str(tmp_path), prefix='su2').save(type('Model', (), {'field': A})(), 7)
-    with h5py.File(path, 'r') as f:
-        assert f['value'].dtype == np.complex128 and f.attrs['type'] == 'LatticeVectorComplexMatrix' and f.attrs['step'] == 7
-    B = field()
-    lines = []
-    assert load_into(B, path, log=lines.append) == 7
-    assert np.array_equal(B.value, A.value)                                      # bit for bit: nothing rounded to complex64
-    assert_su2(B.value, 1e-14)                                                   # still unitary to double precision, not 1e-7
-    assert not any('WARNING' in l for l in lines)
-    single = A.value.astype(np.complex64).astype(np.complex128)
-    assert np.abs(np.linalg.det(single) - 1).max() > 1e-8                        # what the old single-precision file would have given
+    from pylattice.core.measure import measure_files
+    from pylattice.theories.gauge import sun_meas
+    cc, field, model = make([8, 4, 4], N=3, beta=5.5, hot=False)
+    for _ in range(2):
+        model.sweep()
+    with shared_tempdir() as d:
+        paths = [Checkpointer(1, directory=d, prefix='su3').save(model, s) for s in (4, 9)]
+        out = os.path.join(d, 'm.json')
+        measure_files(paths, lambda p: sun_meas.measure_su(p, cc, field.grid, 5.5, 3, 2), MPI.COMM_WORLD, filename=out)
+        MPI.COMM_WORLD.Barrier()
+        want = {**plaquette_observables(field, 5.5), **sun_meas.loop_observables(field, 2)}
+        records = json.load(open(out))['measurements']
+        assert [r['sweep'] for r in records] == [4, 9]
+        for key, value in want.items():
+            assert records[0][key] == pytest.approx(value, abs=1e-12), key
+        out2 = os.path.join(d, 'cli.json')
+        sun_meas.main(paths + ['--beta=5.5', '--out=' + out2, '--max-loop=3', '--mpigrid=' + 'x'.join(map(str, cc.mpigrid))])    # no --nc
+        MPI.COMM_WORLD.Barrier()
+        records = json.load(open(out2))['measurements']
+        assert {'W13', 'W23', 'W33', 'creutz22', 'creutz33', 'polyakov', 'plaq_s', 'plaq_t'} <= set(records[0])
+        assert records[0]['plaq_re'] == pytest.approx(want['plaq_re'], abs=1e-12)
+        with pytest.raises(SystemExit) as exc:                                             # a 5x5 loop does not fit 4 sites
+            sun_meas.main(paths + ['--beta=5.5', '--out=' + out2, '--max-loop=5', '--mpigrid=' + 'x'.join(map(str, cc.mpigrid))])
+        assert exc.value.code == 1
+
+
+@needs_hdf5
+def test_the_offline_measurements_are_named_after_the_run_of_the_checkpoints():
+    from pylattice.core.callbacks import Checkpointer
+    from pylattice.theories.gauge import sun_meas
+    cc, field, model = make([8, 4], N=3, beta=5.5, hot=True)
+    with shared_tempdir() as d:
+        name = run_name(3, field.grid, cc, '5.5')
+        paths = [Checkpointer(1, directory=d, prefix=name).save(model, s) for s in (5, 10)]
+        sun_meas.main(paths + ['--beta=5.5', '--max-loop=2', '--logfile', '--mpigrid=' + 'x'.join(map(str, cc.mpigrid))])
+        MPI.COMM_WORLD.Barrier()
+        assert sorted(f for f in os.listdir('.') if not f.endswith('.hdf5')) == [name + '_meas_offline.json', name + '_meas_offline.log']
+        records = json.load(open(name + '_meas_offline.json'))['measurements']
+        assert [r['sweep'] for r in records] == [5, 10] and 'W22' in records[0]
+
+
+if __name__ == '__main__':
+    import traceback
+    tests = [(name, f) for name, f in sorted(globals().items()) if name.startswith('test_') and callable(f)]
+    for name, f in tests:
+        if getattr(f, 'needs_hdf5', False) and not parallel_hdf5():
+            if MPI.COMM_WORLD.Get_rank() == 0:
+                print('[-] {} skipped: no h5py with parallel HDF5'.format(name))
+            continue
+        marks = getattr(f, 'pytestmark', None)
+        cases = [()]
+        if marks and any(m.name == 'parametrize' for m in marks):
+            cases = list(next(m.args[1] for m in marks if m.name == 'parametrize'))
+            cases = [c if isinstance(c, tuple) else (c,) for c in cases]
+        try:
+            for case in cases:
+                f(*case)
+        except BaseException:
+            # a rank that fails must stop them all: the others would wait for it in a collective call
+            print('[x] {} failed on rank {}'.format(name, MPI.COMM_WORLD.Get_rank()), flush=True)
+            traceback.print_exc()
+            MPI.COMM_WORLD.Abort(1)
+        if MPI.COMM_WORLD.Get_rank() == 0:
+            print('[+] {} passed on {} rank(s)'.format(name, MPI.COMM_WORLD.Get_size()))

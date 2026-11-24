@@ -7,7 +7,8 @@ Elements are numpy arrays of any batch shape: the group fixes the shape of ONE e
 number, (2, 2) for an SU(2) matrix), and an array of elements has shape size + shape. Functions that draw
 take a numpy Generator (pylattice.core.rng); None gives a fresh unseeded one.
 
-Implementations: pylattice.core.groups.discrete (Z2, Z_q), pylattice.core.groups.su2 (SU2).
+Implementations: pylattice.core.groups.discrete (Z2, Z_q), pylattice.core.groups.su2 (SU2),
+pylattice.core.groups.su (SU(N)).
 """
 from abc import ABC, abstractmethod
 

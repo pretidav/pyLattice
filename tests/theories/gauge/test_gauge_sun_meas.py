@@ -1,10 +1,10 @@
-"""Tests of the offline measurements of SU(2) configurations (pylattice.theories.gauge.su2_meas): the plaquettes, the
+"""Tests of the offline measurements of SU(2) configurations (pylattice.theories.gauge.sun_meas): the plaquettes, the
 Polyakov loop, the Wilson loops and the Creutz ratios, compared with a serial numpy computation on the whole lattice, and
 their measurement on stored configurations (checkpoints, which need h5py with parallel HDF5: skipped without).
 They run on one process or on a lattice split over 2 or 4 ranks:
 
-    pytest tests/theories/gauge/test_gauge_su2_meas.py
-    mpiexec -n 2 python tests/theories/gauge/test_gauge_su2_meas.py        # 2 ranks (1 or 4 also work)
+    pytest tests/theories/gauge/test_gauge_sun_meas.py
+    mpiexec -n 2 python tests/theories/gauge/test_gauge_sun_meas.py        # 2 ranks (1 or 4 also work)
 """
 import contextlib
 import json
@@ -19,9 +19,9 @@ from mpi4py import MPI
 
 from pylattice.core.groups import su2 as group
 from pylattice.core.parallel import CartesianComm
-from pylattice.theories.gauge.su2 import SU2Model, plaquette_observables
-from pylattice.theories.gauge.su2_meas import loop_observables, main, measure_su2
-from pylattice.theories.gauge.sun import SU2Field
+from pylattice.theories.gauge.field import SU2Field
+from pylattice.theories.gauge.sun import SUNModel, plaquette_observables
+from pylattice.theories.gauge.sun_meas import loop_observables, main, measure_su
 
 COMM = MPI.COMM_WORLD
 dag = lambda M: np.conj(np.swapaxes(M, -1, -2))
@@ -190,10 +190,10 @@ def test_stored_configurations_are_measured_in_the_order_of_their_steps():
     other = SU2Field(grid=field.grid, cartesiancomm=cc, Nd=3)                            # a cold configuration
     with shared_tempdir() as d:
         configs = {5: other, 2: field}                                                   # saved out of order
-        paths = [Checkpointer(1, directory=d, prefix='c').save(SU2Model(f, None, beta=2.0), step)
+        paths = [Checkpointer(1, directory=d, prefix='c').save(SUNModel(f, None, beta=2.0), step)
                  for step, f in configs.items()]
         out = os.path.join(d, 'meas.json')
-        measure_files(paths, lambda p: measure_su2(p, cc, field.grid, 2.0, 2), COMM, filename=out)
+        measure_files(paths, lambda p: measure_su(p, cc, field.grid, 2.0, 2, 2), COMM, filename=out)
         COMM.Barrier()
         records = read(out)
         assert [r['sweep'] for r in records] == [2, 5] and records[0]['acceptance'] is None
@@ -212,7 +212,7 @@ def test_offline_measurements_equal_the_ones_made_during_the_run():
     rng = cc.rng(7)
     field = SU2Field(grid=loc, cartesiancomm=cc, Nd=2, rng=rng)
     field.random_config(rng)
-    model = SU2Model(field, None, beta=2.0, eps=0.5, rng=rng, algorithm='heatbath', overrelax=1)
+    model = SUNModel(field, None, beta=2.0, eps=0.5, rng=rng, algorithm='heatbath', overrelax=1)
     from pylattice.core import montecarlo
     with shared_tempdir() as d:
         online = os.path.join(d, 'online.json')
@@ -220,7 +220,7 @@ def test_offline_measurements_equal_the_ones_made_during_the_run():
         COMM.Barrier()
         offline = os.path.join(d, 'offline.json')
         measure_files([os.path.join(d, 'c_{:08d}.hdf5'.format(k)) for k in (1, 2, 3)],
-                      lambda p: measure_su2(p, cc, loc, 2.0, 1), COMM, filename=offline)
+                      lambda p: measure_su(p, cc, loc, 2.0, 2, 1), COMM, filename=offline)
         COMM.Barrier()
         a, b = read(online)[1:], read(offline)                                           # sweep 0 (no checkpoint) left out
         assert [r['sweep'] for r in a] == [r['sweep'] for r in b] == [1, 2, 3]
@@ -239,12 +239,12 @@ def test_a_file_that_is_not_an_su2_configuration_stops_the_run_and_keeps_what_wa
     bad = SU2Field(grid=field.grid, cartesiancomm=cc, Nd=2)
     bad.value = bad.value * 1.5                                                          # not unitary
     with shared_tempdir() as d:
-        p1 = Checkpointer(1, directory=d, prefix='c').save(SU2Model(field, None, beta=2.0), 1)
+        p1 = Checkpointer(1, directory=d, prefix='c').save(SUNModel(field, None, beta=2.0), 1)
         p2 = os.path.join(d, 'bad.hdf5')
         Writer(lattice=bad, cartesiancomm=cc).write(p2)
         out = os.path.join(d, 'meas.json')
         with pytest.raises(ValueError, match='not an SU\\(2\\) configuration'):
-            measure_files([p1, p2], lambda p: measure_su2(p, cc, field.grid, 2.0, 2), COMM, filename=out)
+            measure_files([p1, p2], lambda p: measure_su(p, cc, field.grid, 2.0, 2, 2), COMM, filename=out)
         COMM.Barrier()
         assert [r['sweep'] for r in read(out)] == [1]                                    # valid JSON, the good one is in
 
@@ -254,7 +254,7 @@ def test_command_line_measures_the_stored_configurations():
     from pylattice.core.callbacks import Checkpointer
     cc, field, U = global_field([8, 4, 4])
     with shared_tempdir() as d:
-        paths = [Checkpointer(1, directory=d, prefix='c').save(SU2Model(field, None, beta=2.0), s) for s in (4, 8)]
+        paths = [Checkpointer(1, directory=d, prefix='c').save(SUNModel(field, None, beta=2.0), s) for s in (4, 8)]
         out = os.path.join(d, 'm.json')
         base = paths + ['--beta=2.0', '--out=' + out, '--mpigrid=' + 'x'.join(map(str, cc.mpigrid))]
         main(base + ['--max-loop=3'])

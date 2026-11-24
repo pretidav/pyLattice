@@ -3,6 +3,7 @@ import logging
 import math
 import os
 import platform
+import re
 import socket
 import subprocess
 import sys
@@ -46,6 +47,22 @@ def _every(text):
     return every
 
 
+def format_beta(beta):
+    """beta as it appears in the names of the files: the shortest exact form, 1.5 -> '1.5', 10.0 -> '10'"""
+    text = repr(float(beta))
+    return text[:-2] if text.endswith('.0') else text
+
+
+def offline_name(files):
+    """The start of the names of the files of an offline measurement of the checkpoint files: their common run name, that is
+    the file name without '_<step>.hdf5' (<theory>_grid<grid>_mpi<mpigrid>_b<beta> for the files of a run), followed by
+    _meas_offline.json for the measurements and _meas_offline.log for the log; 'measurements' when the files have no common
+    name. The name says 'offline' so that it does not overwrite the measurements made during the run."""
+    stems = [re.sub(r'_\d+$', '', os.path.splitext(os.path.basename(f))[0]) for f in files]
+    base = stems[0] if len(set(stems)) == 1 else os.path.commonprefix(stems).rstrip('_')
+    return (base or 'measurements') + '_meas_offline'
+
+
 def _positive(text):
     try:
         n = int(text)
@@ -83,7 +100,8 @@ class Parser():
     change the defaults of the common ones with parser.set_defaults), extra_info() lists them, as [(name, value)], in
     the 'run' box of the banner. Their values are in self.args."""
 
-    def __init__(self, argv=None):
+    def __init__(self, argv=None, theory=None):
+        self.theory = theory                       # the name of the theory in the names of the files (see run_name)
         self.args = self.parser(argv)
         self.grid = self.args['grid']
         self.mpigrid = self.args['mpigrid']
@@ -120,7 +138,8 @@ class Parser():
         parser.add_argument('--beta', type=_beta, default=0.5, help='inverse temperature')
         parser.add_argument('--seed', type=_seed, default=0, help='seed of the random number generators')
         parser.add_argument('--checkpoint-every', type=_every, default=0, metavar='N',
-                            help='save the configuration to ./checkpoints every N sweeps, and at the end (0: never)')
+                            help='save the configuration to ./checkpoints every N sweeps, and at the end (0: never); the files are '
+                                 '<theory>_grid<grid>_mpi<mpigrid>_b<beta>_<sweep>.hdf5')
         parser.add_argument('--runlog-every', type=_every, default=None, metavar='N',
                             help='log a line every N sweeps, on the terminal and in the log file: step, observables, '
                                  'memory, cpu, sweeps per second (0: never; default: about 20 lines per run)')
@@ -130,24 +149,46 @@ class Parser():
                                  'of the ranks may differ')
         parser.add_argument('--debug', action='store_true',
                             help='log at DEBUG level, from every rank')
-        parser.add_argument('--logfile', default='run.log', metavar='FILE',
+        parser.add_argument('--logfile', default=None, metavar='FILE',
                             help="the log file: logo, system and run summary, messages and one line per "
                                  "--runlog-every sweeps, the same as on the terminal but in plain text, appended "
-                                 "to if it exists ('off': no file)")
+                                 "to if it exists (default: <theory>_grid<grid>_mpi<mpigrid>_b<beta>.log; 'off': no file)")
         parser.add_argument('--progress', action='store_true',
                             help='also draw a progress bar (rank 0)')
         self.add_options(parser)
         args = vars(parser.parse_args(argv))
         if args['runlog_every'] is None:
             args['runlog_every'] = max(1, (args['steps'] + args['thermalization']) // 20) if args['steps'] + args['thermalization'] else 0
-        if args['logfile'].lower() in ('off', 'none', ''):
-            args['logfile'] = None
+        if args['logfile'] is not None and args['logfile'].lower() in ('off', 'none', ''):
+            args['logfile'] = False                 # None: the default name, False: no file
         if args['start_from'] is not None and not os.path.isfile(args['start_from']):
             parser.error('--start-from: no such file: {}'.format(args['start_from']))
         if len(args['grid']) != len(args['mpigrid']):
             parser.error('--grid has {} dimensions but --mpigrid has {}'.format(
                 len(args['grid']), len(args['mpigrid'])))
         return args
+
+    def run_name(self):
+        """The start of the name of every file of the run, <theory>_grid<grid>_mpi<mpigrid>_b<beta>, e.g.
+        ising_grid20x20_mpi2x2_b1.5: the log is run_name + '.log', the measurements run_name + '_meas.json', the checkpoints
+        run_name + '_<sweep>.hdf5', so that a file says which run it comes from. The grid and the mpigrid are as given
+        (the lattice of each rank, and the ranks along each direction). Without a theory the name starts with 'run'."""
+        return '{}_grid{}_mpi{}_b{}'.format(self.theory or 'run', 'x'.join(map(str, self.grid)),
+                                            'x'.join(map(str, self.mpigrid)), format_beta(self.beta))
+
+    def log_filename(self):
+        """the log file: --logfile if given, else run_name + '.log'; None if the log file is switched off (--logfile=off)"""
+        if self.logfile is False:
+            return None
+        return self.logfile if self.logfile else self.run_name() + '.log'
+
+    def meas_filename(self):
+        """the measurements file of the run, run_name + '_meas.json'"""
+        return self.run_name() + '_meas.json'
+
+    def checkpoint_prefix(self):
+        """the checkpoints are written as checkpoints/<checkpoint_prefix>_<sweep>.hdf5, the prefix being run_name"""
+        return self.run_name()
 
     def add_options(self, parser):
         """the options of a theory, added to the argparse `parser` (none here)"""
@@ -185,7 +226,7 @@ class _RankFilter(logging.Filter):
 
 
 class Logger():
-    """Logger 'pylattice' with colored output (rich) and, with logfile=True, also a plain-text file (run.log).
+    """Logger 'pylattice' with colored output (rich) and, with logfile=True, also a plain-text file (filename).
 
     Besides the messages (log.info, ...), show(renderable) prints a rich object (the boxes of the banner, a line of
     the run log) on the terminal and, in plain text, in the file. Only rank 0 shows anything.
@@ -349,8 +390,8 @@ def run_info(parser=None, comm=None, argv=None):
             ('checkpoint every', parser.checkpoint_every or 'off'),
             ('run log every', parser.runlog_every or 'off'),
             ('debug', parser.debug),
-            ('log file', parser.logfile or 'off'),
-            ('measurements', 'meas.json'),
+            ('log file', parser.log_filename() or 'off'),
+            ('measurements', parser.meas_filename()),
         ] + list(parser.extra_info())))
     return sections
 

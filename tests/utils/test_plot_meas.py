@@ -74,6 +74,34 @@ def test_command_prints_the_table_and_writes_the_figures(tmp_path, capsys):
     assert not other.exists()
 
 
+def test_the_figures_are_named_after_the_run(tmp_path, capsys):
+    run = 'ising_grid20x20_mpi2x2_b1.5'
+    for meas, prefix in ((run + '_meas.json', run + '_'), (run + '_meas_offline.json', run + '_offline_')):
+        p = tmp_path / meas
+        write(p, n=60)
+        out = tmp_path / ('figs_' + prefix)
+        plot_meas.main([str(p), '--outdir', str(out)])
+        capsys.readouterr()
+        assert sorted(f.name for f in out.iterdir()) == sorted(prefix + n + '.png' for n in ('acceptance', 'e', 'm'))
+    assert [plot_meas.figure_prefix(x) for x in (run + '_meas.json', 'dir/' + run + '_meas.json', 'meas.json', 'a/meas.json',
+                                                 'x_meas_offline.json', 'plain.json')] == [run + '_', run + '_', '', '', 'x_offline_', 'plain_']
+
+
+def test_without_a_file_the_only_measurements_file_of_the_directory_is_used(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as e:
+        plot_meas.main(['--no-plot'])
+    assert e.value.code == 1 and 'there is no measurements file' in capsys.readouterr().err
+    write(tmp_path / 'su3_grid4x4_mpi1x2_b5.7_meas.json', n=30)
+    plot_meas.main(['--no-plot'])
+    assert 'su3_grid4x4_mpi1x2_b5.7_meas.json: 30 measurements' in capsys.readouterr().out
+    write(tmp_path / 'su3_grid4x4_mpi1x2_b5.7_meas_offline.json', n=30)
+    with pytest.raises(SystemExit) as e:                                               # two: it asks which
+        plot_meas.main(['--no-plot'])
+    err = capsys.readouterr().err
+    assert e.value.code == 1 and 'there are several measurements files' in err and 'meas_offline.json' in err
+
+
 def test_reads_a_file_of_a_run_that_is_still_going(tmp_path, capsys):
     p = tmp_path / 'meas.json'
     p.write_text('{"measurements": [\n  {"sweep": 0, "m": 0.1, "acceptance": null},\n  {"sweep": 1, "m": 0.2, "acceptance": 0.5}\n]}\n')

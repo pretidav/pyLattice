@@ -34,18 +34,18 @@ jobs:
         run:  mpiexec -n 2 python tests/core/test_grid_mpi.py
       - name: Run test groups (discrete, SU(2), SU(N), common interface)
         run:  pytest tests/core/test_discrete.py tests/core/test_su2.py tests/core/test_su.py tests/core/test_group_interface.py
-      - name: Run test SU(2) gauge field
+      - name: Run test SU(N) gauge fields (links, staples, loops, gauge transformations)
+        run:  pytest tests/theories/gauge/test_gauge_field_su2.py tests/theories/gauge/test_gauge_field_sun.py
+      - name: Run test SU(N) gauge fields in parallel
+        run:  mpiexec -n 2 python tests/theories/gauge/test_gauge_field_mpi.py
+      - name: Run test SU(N) gauge theory (Cabibbo-Marinari, Metropolis and overrelaxation sweeps)
         run:  pytest tests/theories/gauge/test_gauge_sun.py
-      - name: Run test SU(2) gauge theory (Metropolis sweep)
-        run:  pytest tests/theories/gauge/test_gauge_su2.py
-      - name: Run test SU(2) offline measurements (loops)
-        run:  pytest tests/theories/gauge/test_gauge_su2_meas.py
-      - name: Run test SU(2) offline measurements in parallel
-        run:  mpiexec -n 2 python tests/theories/gauge/test_gauge_su2_meas.py
-      - name: Run test SU(2) gauge theory in parallel
-        run:  mpiexec -n 2 python tests/theories/gauge/test_gauge_su2.py
-      - name: Run test SU(2) gauge field in parallel
-        run:  mpiexec -n 2 python tests/theories/gauge/test_gauge_sun_mpi.py
+      - name: Run test SU(N) gauge theory in parallel
+        run:  mpiexec -n 2 python tests/theories/gauge/test_gauge_sun.py
+      - name: Run test SU(N) offline measurements (loops, Creutz ratios)
+        run:  pytest tests/theories/gauge/test_gauge_sun_meas.py
+      - name: Run test SU(N) offline measurements in parallel
+        run:  mpiexec -n 2 python tests/theories/gauge/test_gauge_sun_meas.py
       - name: Run test random streams
         run:  pytest tests/core/test_rng.py
       - name: Run test random streams in parallel

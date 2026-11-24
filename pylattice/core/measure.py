@@ -1,13 +1,13 @@
 """Measurements on configurations that are already on disk (the checkpoints of a run), without running
 any Monte Carlo: the offline counterpart of the measurements made during a run.
 
-    measure_files(files, measure, comm, filename='meas.json')
+    measure_files(files, measure, comm, filename=pylattice.core.cli.offline_name(files) + '.json')
 
 For every file it calls measure(path), which loads the configuration and returns its observables as a
-dict, and writes the record to a meas.json of the same format as a run's (pylattice.core.callbacks.
+dict, and writes the record to a measurements file of the same format as a run's (pylattice.core.callbacks.
 MeasurementFile), with the step the checkpoint was saved at as "sweep" and no acceptance. The records
 are in the order of the steps, each one flushed as soon as it is made, so the file is valid at every
-moment. Print and plot it like any other: python -m pylattice.utils.plot_meas meas.json
+moment. Print and plot it like any other: python -m pylattice.utils.plot_meas <the file>
 
 A theory supplies measure() (see pylattice.theories.spin.ising_meas). Everything is collective: every
 rank takes part in the loading and in the observables.

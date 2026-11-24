@@ -1,6 +1,6 @@
 """SU(2): the algebra, the exponential map, the projection onto the group, and the quaternionic
 representation of Creutz. Pure math on 2x2 matrices: no lattice and no MPI here. The gauge theory built on
-these is in pylattice.theories.gauge.sun.
+these is in pylattice.theories.gauge.field (the fields) and pylattice.theories.gauge.sun (the theory).
 
 Why SU(2) first: every SU(N) update (Cabibbo-Marinari) is a sequence of SU(2) updates on the 2x2
 subblocks embedded in SU(N): heatbath_link updates one block, and pylattice.core.groups.su picks and puts
