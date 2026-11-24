@@ -1,4 +1,4 @@
-[![Run Python Tests](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml/badge.svg?branch=su2)](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml)
+[![Run Python Tests](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml/badge.svg?branch=main)](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml)
 
 # pyLattice
 <p align="center">
