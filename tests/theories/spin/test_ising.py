@@ -558,6 +558,25 @@ def test_start_from_must_be_an_existing_file():
     assert Parser([]).start_from is None
 
 
+def test_the_spins_are_elements_of_z2_and_a_flip_is_the_product_with_its_generator():
+    from pylattice.core.groups.discrete import Z2
+    cc, loc = setup([8, 4])
+    for init in ('hot', 'cold', 'random'):
+        field = IsingField(grid=loc, cartesiancomm=cc, initialization=init, seed=cc.rng(3))
+        assert Z2.contains(field.value).all() and field.value.dtype == np.float32
+    assert (IsingField(grid=loc, cartesiancomm=cc, initialization='hot').value == Z2.identity_element).all()
+    assert (IsingField(grid=loc, cartesiancomm=cc, initialization='cold').value == Z2.generator).all()
+    a = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=cc.rng(4)).value
+    assert np.array_equal(a, Z2.random(cc.rng(4), a.shape).astype(np.float32))      # the stream of Z2.random
+    counts = cc.comm.allreduce((int((a == 1).sum()), int((a == -1).sum())))        # both values occur, over all the ranks
+    assert counts[0] > 0 and counts[1] > 0
+    model = IsingModel(field=IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=cc.rng(5)),
+                       logger=None, beta=0.0, rng=cc.rng(6))                             # beta 0: every flip is accepted
+    before = model.field.value.copy()
+    model.sweep()
+    assert np.array_equal(model.field.value, Z2.multiply(before, Z2.generator)) and Z2.contains(model.field.value).all()
+
+
 if __name__ == '__main__':
     import traceback
     tests = [(name, f) for name, f in sorted(globals().items()) if name.startswith('test_') and callable(f)]

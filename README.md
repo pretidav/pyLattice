@@ -1,4 +1,4 @@
-[![Run Python Tests](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml/badge.svg?branch=main)](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml)
+[![Run Python Tests](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml/badge.svg?branch=su2)](https://github.com/pretidav/pyLattice/actions/workflows/testonbuild.yml)
 
 # pyLattice
 <p align="center">
@@ -9,8 +9,9 @@ A lattice (gauge) theory simulation library in Python, parallel with MPI. A latt
 a theory provides the Monte Carlo sweep, and the library provides the rest: checkpoints and exact restarts,
 logs, measurements written as the run goes, and offline analysis.
 
-Implemented: the Ising model (spin theories on sites) and SU(2) fields and groups (gauge theories on links, the
-Monte Carlo is not written yet).
+Implemented: the Ising model (spin theories on sites, with values in the group Z2) and SU(2): the group (algebra,
+quaternionic representation of Creutz, link heat bath, SU(N) from SU(2) blocks) and a field of links; the gauge
+Monte Carlo itself (Wilson action, staples) is not written yet.
 
 **Contents:** [Installation](#installation) · [Quick start](#quick-start) · [Running a simulation](#running-a-simulation) ·
 [Working with the results](#working-with-the-results) · [Repository layout](#repository-layout) · [Tests](#tests) ·
@@ -132,6 +133,8 @@ filled, and the run stops with a message if they differ (wrong type, wrong latti
 - Checkpoints hold the random state of every rank. On the **same rank layout** the restarted run continues exactly,
   bit for bit, as if it had not stopped. On another layout the configuration is loaded but the random numbers
   start afresh (the log warns).
+- Checkpoints keep the precision of the field (single for the Ising spins, double for SU(2) links): nothing is
+  rounded on the way to the disk.
 - The sweep counter and `meas.json` start afresh.
 
 ---
@@ -170,7 +173,12 @@ pylattice/
   core/            tensors, lattice fields on an MPI grid, parallel HDF5 I/O, command line, random streams,
                    statistics, Monte Carlo driver (the theories provide the sweep), callbacks
                    (checkpoints, run log, measurements file), offline measurements
-    groups/        groups and algebras (SU(2) for now)
+    groups/        the groups the variables take values in, behind one interface (base.py: identity,
+                   product, inverse, random, project, contains):
+                     discrete.py  Z2 (the Ising spin), Z_q (clock, Potts-like), exact heat bath
+                     lie.py       interface of the Lie groups (algebra, exp, log, near-identity)
+                     su2.py       SU(2): algebra, exponential, quaternions (Creutz), heat bath of a link
+                     su.py        SU(N) from its SU(2) subgroups (Cabibbo-Marinari)
   theories/
     spin/          variables on sites: Ising (simulation and offline measurements)
     gauge/         variables on links: SU(2) gauge field
@@ -188,24 +196,34 @@ randomness of a sweep comes from the generator it is given, which is what makes 
 
 ## Tests
 
-Tests run on one process with `pytest`, and the MPI ones also as scripts on several ranks:
+Nothing runs the tests for you after an installation. To check that everything works on your machine, run
+the script yourself (from the repository root, in the environment you installed):
 
 ~~~
-pytest tests/core/test_tensors.py tests/core/test_cli.py tests/core/test_rng.py tests/core/test_stats.py \
-       tests/core/test_montecarlo.py tests/core/test_callbacks.py tests/theories tests/utils
-python tests/core/test_grid.py
-python tests/core/test_grid_eo.py
-mpiexec -n 2 python tests/core/test_grid_mpi.py
-mpiexec -n 4 python tests/core/test_hdf5io.py          # needs exactly 4 ranks (2x2 grid)
-mpiexec -n 2 python tests/core/test_rng.py
-mpiexec -n 2 python tests/core/test_montecarlo.py
-mpiexec -n 2 python tests/core/test_callbacks.py
-mpiexec -n 2 python tests/theories/spin/test_ising.py          # 1, 2 or 4 ranks
-mpiexec -n 2 python tests/theories/spin/test_ising_meas.py
+python run_tests.py              # the standard routine: single process and 2 ranks (about 30 s)
+python run_tests.py --quick      # only the single-process tests (about 15 s)
+python run_tests.py --full       # also every MPI test on 1 and 4 ranks, and the cross-layout HDF5 test
+python run_tests.py -k ising     # only the steps whose name contains "ising"
+python run_tests.py -v           # show the output of every step, not only of the failed ones
 ~~~
 
-The tests that write checkpoints (checkpoints, restart, offline measurements) are skipped without a parallel
-`h5py`; the GitHub workflow (`.github/workflows/testonbuild.yml`) runs all the others, so those are skipped there.
+It prints the system it found (packages, `mpiexec`, cores, parallel `h5py`), one coloured line per step
+(`PASS`, `FAIL` with the end of its output, or `SKIP` with the reason), and a summary; the exit status is 1 if
+anything failed, so it can be used in your own scripts. The steps run in a scratch directory and leave no files
+behind. They are the same checks as the GitHub workflow (`.github/workflows/testonbuild.yml`) plus the ones that
+need 4 ranks. Without a parallel `h5py` the tests that write checkpoints (checkpoints, restart, offline
+measurements, the HDF5 tests) are skipped and say so; the GitHub workflow has no parallel `h5py` either.
+
+A new test file has to be added to the lists at the top of `run_tests.py`: a test checks that none is missing.
+
+To run a test file by hand (needs `pip install -e . --no-deps`, or `export PYTHONPATH=.`):
+
+~~~
+pytest tests/core/test_su2.py -q
+mpiexec -n 2 python tests/theories/spin/test_ising.py          # the MPI scripts: 1, 2 or 4 ranks
+mpiexec -n 4 python tests/core/test_hdf5io.py                  # needs exactly 4 ranks
+mpiexec -n 2 python tests/core/test_grid_mpi.py                # needs exactly 2 ranks
+~~~
 
 ---
 

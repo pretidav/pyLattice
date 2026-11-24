@@ -56,23 +56,28 @@ class Writer():
         file = h5py.File(filename, 'w', driver='mpio', comm=self.cartesiancomm.comm)
        
         self.write_header(file=file)
+        # the dataset has the precision of the lattice (float32 / complex64 for the lattices of this package,
+        # complex128 for an SU2Field): nothing is rounded on the way to the disk
+        dtype = self.lattice.value.dtype
+        if dtype.kind not in 'fc':
+            raise TypeError("cannot write a lattice of {} values".format(dtype))
         
         if isinstance(self.lattice, LatticeReal):
-            dset = file.create_dataset('value', shape=int(np.prod(self.lattice.grid*self.cartesiancomm.mpigrid)), dtype='float32')
+            dset = file.create_dataset('value', shape=int(np.prod(self.lattice.grid*self.cartesiancomm.mpigrid)), dtype=dtype)
         elif isinstance(self.lattice, LatticeComplex):
-            dset = file.create_dataset('value', shape=int(np.prod(self.lattice.grid*self.cartesiancomm.mpigrid)), dtype='complex64')
+            dset = file.create_dataset('value', shape=int(np.prod(self.lattice.grid*self.cartesiancomm.mpigrid)), dtype=dtype)
         elif isinstance(self.lattice, LatticeRealMatrix):
-            dset = file.create_dataset('value', shape=(int(np.prod(self.lattice.grid*self.cartesiancomm.mpigrid)), int(self.lattice.N), int(self.lattice.N)), dtype='float32')
+            dset = file.create_dataset('value', shape=(int(np.prod(self.lattice.grid*self.cartesiancomm.mpigrid)), int(self.lattice.N), int(self.lattice.N)), dtype=dtype)
         elif isinstance(self.lattice, LatticeComplexMatrix):
-            dset = file.create_dataset('value', shape=(int(np.prod(self.lattice.grid*self.cartesiancomm.mpigrid)), int(self.lattice.N), int(self.lattice.N)), dtype='complex64')
+            dset = file.create_dataset('value', shape=(int(np.prod(self.lattice.grid*self.cartesiancomm.mpigrid)), int(self.lattice.N), int(self.lattice.N)), dtype=dtype)
         elif isinstance(self.lattice, LatticeVectorReal):
-            dset = file.create_dataset('value', shape=(int(np.prod(self.lattice.grid*self.cartesiancomm.mpigrid)), int(self.lattice.Nd)), dtype='float32')
+            dset = file.create_dataset('value', shape=(int(np.prod(self.lattice.grid*self.cartesiancomm.mpigrid)), int(self.lattice.Nd)), dtype=dtype)
         elif isinstance(self.lattice, LatticeVectorComplex):
-            dset = file.create_dataset('value', shape=(int(np.prod(self.lattice.grid*self.cartesiancomm.mpigrid)), int(self.lattice.Nd)), dtype='complex64')
+            dset = file.create_dataset('value', shape=(int(np.prod(self.lattice.grid*self.cartesiancomm.mpigrid)), int(self.lattice.Nd)), dtype=dtype)
         elif isinstance(self.lattice, LatticeVectorRealMatrix):
-            dset = file.create_dataset('value', shape=(int(np.prod(self.lattice.grid*self.cartesiancomm.mpigrid)), int(self.lattice.Nd), int(self.lattice.N), int(self.lattice.N)), dtype='float32')
+            dset = file.create_dataset('value', shape=(int(np.prod(self.lattice.grid*self.cartesiancomm.mpigrid)), int(self.lattice.Nd), int(self.lattice.N), int(self.lattice.N)), dtype=dtype)
         elif isinstance(self.lattice, LatticeVectorComplexMatrix):
-            dset = file.create_dataset('value', shape=(int(np.prod(self.lattice.grid*self.cartesiancomm.mpigrid)), int(self.lattice.Nd), int(self.lattice.N), int(self.lattice.N)), dtype='complex64')
+            dset = file.create_dataset('value', shape=(int(np.prod(self.lattice.grid*self.cartesiancomm.mpigrid)), int(self.lattice.Nd), int(self.lattice.N), int(self.lattice.N)), dtype=dtype)
         else : 
             pprint(self.cartesiancomm.comm,'error')
             exit(1)
@@ -134,6 +139,8 @@ class Reader():
             self.lattice = LatticeVectorComplexMatrix(grid=self.grid,cartesiancomm=self.cartesiancomm, N=int(file.attrs['N']),  Nd=int(file.attrs['Nd']))
 
         data = file['value'][...]                      # the dataset is read once, not once per site
+        if self.lattice.value.dtype != data.dtype:     # the precision of the file, not the default of the class
+            self.lattice.value = self.lattice.value.astype(data.dtype)
         for idx in np.ndindex(tuple(self.lattice.grid)):
             coor = self.cartesiancomm.mpicoord
             glob_idx = [] 
@@ -214,9 +221,15 @@ def load_into(lattice, filename, log=None, label='restart'):
         problems.append("there is no dataset 'value' in the file")
     elif datasets['value'][0] != want_shape:
         problems.append("dataset 'value' has shape {}, expected {}".format(datasets['value'][0], want_shape))
+    elif np.dtype(datasets['value'][1]).kind != lattice.value.dtype.kind:
+        problems.append("dataset 'value' holds {} numbers, the field {}".format(datasets['value'][1], lattice.value.dtype))
     if problems:
         raise ValueError("cannot restart from '{}': {}".format(filename, '; '.join(problems)))
     log(label + ": the structure on disk matches the field: reading")
+    on_disk = np.dtype(datasets['value'][1])
+    if np.finfo(on_disk).eps > np.finfo(lattice.value.dtype).eps:
+        log("{}: WARNING: the file holds {} numbers and the field {}: the values were rounded when the file "
+            "was written (files of this version keep the precision of the lattice)".format(label, on_disk, lattice.value.dtype))
 
     loaded = Reader(cartesiancomm=cc).read(filename)
     lattice.value[...] = loaded.value

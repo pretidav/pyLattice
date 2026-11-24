@@ -356,6 +356,10 @@ def test_eo_shift(grid, comm):
 
 
 if __name__ == '__main__':
+    from mpi4py import MPI
+    if MPI.COMM_WORLD.Get_size() != 2:                  # the rank grids below hold 2 ranks: any other number would hang
+        pprint(comm=MPI.COMM_WORLD, msg='[-] skipped: this script needs exactly 2 ranks (mpiexec -n 2)')
+        raise SystemExit(0)
     CC = CartesianComm(mpigrid=[2, 1])
     test_LatticeReal2D(grid=[3, 3], comm=CC)
     test_LatticeComplex2D(grid=[3, 3], comm=CC)

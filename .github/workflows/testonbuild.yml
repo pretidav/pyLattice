@@ -30,6 +30,10 @@ jobs:
         run:  python tests/core/test_grid_eo.py
       - name: Run test MPI Lattice
         run:  mpiexec -n 2 python tests/core/test_grid_mpi.py
+      - name: Run test groups (discrete, SU(2), SU(N), common interface)
+        run:  pytest tests/core/test_discrete.py tests/core/test_su2.py tests/core/test_su.py tests/core/test_group_interface.py
+      - name: Run test SU(2) gauge field
+        run:  pytest tests/theories/gauge/test_gauge_sun.py
       - name: Run test random streams
         run:  pytest tests/core/test_rng.py
       - name: Run test random streams in parallel
@@ -54,3 +58,5 @@ jobs:
         run:  mpiexec -n 2 python tests/theories/spin/test_ising_meas.py
       - name: Run test plot_meas
         run:  pytest tests/utils/test_plot_meas.py
+      - name: Run test of the local test script
+        run:  pytest tests/utils/test_run_tests.py

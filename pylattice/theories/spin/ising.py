@@ -4,9 +4,11 @@ from copy import copy
 from pylattice.core.parallel import CartesianComm, pprint
 from pylattice.core.cli import Parser, Logger, log_banner
 from pylattice.core import montecarlo
+from pylattice.core.groups.discrete import Z2
 from pylattice.core.callbacks import Checkpointer, RunLog, MeasurementFile
 
 class IsingField(LatticeReal):
+    """A spin on each site with values in the group Z2 (+1, -1; pylattice.core.groups.discrete)."""
     def __init__(self,grid,cartesiancomm, initialization='cold', seed = 0): 
         super().__init__(grid,cartesiancomm)
         self.seed = seed 
@@ -15,15 +17,15 @@ class IsingField(LatticeReal):
 
     def init(self): 
         if self.initialization=='hot': 
-            self.value[:]=np.ones(shape=self.value.shape,dtype='float32')
+            self.value[:]=Z2.identity(self.value.shape)
         if self.initialization=='cold': 
-            self.value[:]=np.ones(shape=self.value.shape,dtype='float32')-2
+            self.value[:]=Z2.generator
         if self.initialization=='random': 
             # seed: an integer, or a numpy Generator (CartesianComm.rng(seed): one independent stream
             # per rank, which the model can go on using). The same integer on every rank would give
             # every rank the same block.
             rng = np.random.default_rng(self.seed)
-            self.value[:]=np.array(rng.choice([-1,1],self.value.shape),dtype='float32')
+            self.value[:]=Z2.random(rng,self.value.shape)
 
     def load(self, filename, log=None, rng=None, label='restart'):
         """Replaces the spins by those of a checkpoint (see pylattice.core.hdf5io.load_into). The file must
@@ -34,7 +36,7 @@ class IsingField(LatticeReal):
         log = log if log is not None else (lambda line: None)
         old = self.value.copy()
         step = load_into(self, filename, log, label)
-        bad = self.cartesiancomm.comm.allreduce(int(np.count_nonzero(np.abs(self.value) != 1)))
+        bad = self.cartesiancomm.comm.allreduce(int(np.count_nonzero(~Z2.contains(self.value))))
         if bad:
             self.value[...] = old
             raise ValueError("cannot restart from '{}': {} values are not +1 or -1, this is not an Ising "
@@ -101,7 +103,7 @@ class IsingModel():
         delta_energy_E, _ = delta_energy.peek_EO_lattices()
         field_E, _ = self.field.peek_EO_lattices()
         acc_E = self.metropolis_test(deltaE = delta_energy_E, rng = rng)
-        field_E.value[:]=np.where(acc_E,field_E.value*-1,field_E.value)
+        field_E.value[:]=np.where(acc_E,Z2.multiply(field_E.value,Z2.generator),field_E.value)   # a flip: times the non-trivial element
         self.field.poke_EO_lattices(E_lattice=field_E)
 
         #Odd Update (its neighbours are the even spins just updated)
@@ -110,7 +112,7 @@ class IsingModel():
         _,delta_energy_O = delta_energy.peek_EO_lattices()
         _, field_O = self.field.peek_EO_lattices()
         acc_O = self.metropolis_test(deltaE = delta_energy_O, rng = rng)
-        field_O.value[:]=np.where(acc_O,field_O.value*-1,field_O.value)
+        field_O.value[:]=np.where(acc_O,Z2.multiply(field_O.value,Z2.generator),field_O.value)
         self.field.poke_EO_lattices(O_lattice=field_O)
         
         self.nn_field = self.get_nn_field() 
