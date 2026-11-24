@@ -2,7 +2,7 @@ from pylattice.core.grid import LatticeReal,LatticeVectorReal
 import numpy as np 
 from copy import copy
 from pylattice.core.parallel import CartesianComm, pprint
-from pylattice.core.cli import Parser, Logger
+from pylattice.core.cli import Parser, Logger, log_banner
 from pylattice.core import montecarlo
 from pylattice.core.callbacks import Checkpointer, RunLog, MeasurementFile
 
@@ -24,6 +24,27 @@ class IsingField(LatticeReal):
             # every rank the same block.
             rng = np.random.default_rng(self.seed)
             self.value[:]=np.array(rng.choice([-1,1],self.value.shape),dtype='float32')
+
+    def load(self, filename, log=None, rng=None, label='restart'):
+        """Replaces the spins by those of a checkpoint (see pylattice.core.hdf5io.load_into). The file must
+        hold a real field of this global lattice and only spins, +1 or -1. Returns the step it was saved
+        at, if recorded. With rng (the Generator of this rank) its state is restored from the file too, when
+        the file has it and the layout of the ranks is the same: the run then continues exactly. Do it before building the IsingModel, which reads the field when it is made."""
+        from pylattice.core.hdf5io import load_into
+        log = log if log is not None else (lambda line: None)
+        old = self.value.copy()
+        step = load_into(self, filename, log, label)
+        bad = self.cartesiancomm.comm.allreduce(int(np.count_nonzero(np.abs(self.value) != 1)))
+        if bad:
+            self.value[...] = old
+            raise ValueError("cannot restart from '{}': {} values are not +1 or -1, this is not an Ising "
+                             "configuration".format(filename, bad))
+        log(label + ": all the spins are +1 or -1; magnetization {:.6f}".format(self.average()))
+        if rng is not None:
+            from pylattice.core.hdf5io import restore_rng
+            restore_rng(rng, filename, self.cartesiancomm.comm, self.cartesiancomm.mpigrid, log)
+        return step
+
 
 class IsingModel():
     def __init__(self,field,logger,beta,rng=None):
@@ -129,17 +150,6 @@ class IsingModel():
             self.elist.extend(self.history.values['e'])
             self.acclist.extend(self.history.acceptance)
 
-    def plot_mc(self):
-        """the magnetization, the energy and the acceptance of the last run_mc against the sweep:
-        mag.png, ene.png, acc.png (see History.plot)"""
-        comm = self.field.cartesiancomm.comm
-        if len(self.history) == 0:
-            pprint(comm=comm, msg='[x] NO PLOTS. "online_obs" must be set to True')
-            return
-        tag = 'size={} beta={}'.format(self.field.grid*self.field.cartesiancomm.mpigrid, self.beta)
-        self.history.plot(comm, files={'m': './mag.png', 'e': './ene.png', 'acceptance': './acc.png'},
-                          titles={'m': 'Magnetization ' + tag, 'e': 'Energy density ' + tag, 'acceptance': 'Acceptance ' + tag})
-
 
 def main(argv=None):
     """Command line driver, e.g.
@@ -148,9 +158,14 @@ def main(argv=None):
     PP = Parser(argv)
     CC = CartesianComm(mpigrid=PP.mpigrid)
     LL = Logger(debug=PP.debug, logfile=PP.logfile)
+    log_banner(LL.log, PP, CC.comm)               # logo, system and run information
     rng = CC.rng(PP.seed)                         # an independent stream on every rank
 
     field = IsingField(grid=PP.grid, cartesiancomm=CC, initialization='random', seed=rng)
+    if PP.start_from:
+        step = field.load(PP.start_from, log=LL.log.info, rng=rng)
+        LL.log.info("restart: running {} new sweeps from the configuration saved at step {}; "
+                    "the sweep counter starts afresh".format(PP.steps, step))
     model = IsingModel(field=field, logger=LL.log, beta=PP.beta, rng=rng)
 
     callbacks = [MeasurementFile('meas.json')]          # every measurement, as soon as it is made
@@ -159,7 +174,7 @@ def main(argv=None):
     if PP.runlog_every:
         callbacks.append(RunLog(PP.runlog_every, filename='run.log'))
     model.run_mc(steps=PP.steps, online_obs=True, callbacks=callbacks)
-    model.plot_mc()
+    LL.log.info('done: measurements in meas.json (print and plot them with: python -m pylattice.utils.plot_meas meas.json)')
 
 
 if __name__ == '__main__':

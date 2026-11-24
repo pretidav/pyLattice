@@ -133,6 +133,7 @@ class Reader():
         elif self.latticetype == 'LatticeVectorComplexMatrix':     
             self.lattice = LatticeVectorComplexMatrix(grid=self.grid,cartesiancomm=self.cartesiancomm, N=int(file.attrs['N']),  Nd=int(file.attrs['Nd']))
 
+        data = file['value'][...]                      # the dataset is read once, not once per site
         for idx in np.ndindex(tuple(self.lattice.grid)):
             coor = self.cartesiancomm.mpicoord
             glob_idx = [] 
@@ -143,6 +144,114 @@ class Reader():
             glob_idx = tuple(glob_idx)
             glob_dim = tuple(glob_dim)
             glob_idx_serialized = np.ravel_multi_index(glob_idx, glob_dim,order='F') 
-            self.lattice.value[self.lattice.get_idx(idx)] = list(file['value'])[glob_idx_serialized]
+            self.lattice.value[self.lattice.get_idx(idx)] = data[glob_idx_serialized]
+        file.close()
         return self.lattice        
         
+
+
+def describe(filename, comm):
+    """What is on disk: {'attrs': {name: value}, 'datasets': {name: (shape, dtype)}}. Rank 0 opens the
+    file and broadcasts; a file that cannot be read raises the same error on every rank."""
+    info = None
+    if comm.Get_rank() == 0:
+        try:
+            with h5py.File(filename, 'r') as f:
+                attrs = {k: (v.tolist() if hasattr(v, 'tolist') else v) for k, v in f.attrs.items()}
+                datasets = {}
+                f.visititems(lambda name, obj: datasets.__setitem__(name, (tuple(obj.shape), str(obj.dtype)))
+                             if isinstance(obj, h5py.Dataset) else None)
+            info = {'attrs': attrs, 'datasets': datasets}
+        except Exception as error:
+            info = {'error': '{}: {}'.format(type(error).__name__, error)}
+    info = comm.bcast(info, root=0)
+    if 'error' in info:
+        raise OSError("cannot read '{}' as an HDF5 file ({})".format(filename, info['error']))
+    return info
+
+
+def load_into(lattice, filename, log=None, label='restart'):
+    """Fills `lattice` with the configuration saved in `filename` (a Checkpointer / Writer file).
+
+    The structure of the file is looked at first and compared with the lattice to fill: type, global grid,
+    number of values per site and the shape of the dataset; whatever differs is a ValueError that names
+    all the differences, before anything is read. The layout of the ranks may be different from the one that
+    wrote the file. The file is read once. A collective call: every rank must make it.
+
+    log: a function that takes a line (e.g. logger.info), to report what is found; label starts the lines.
+    """
+    log = log if log is not None else (lambda line: None)
+    cc = lattice.cartesiancomm
+    comm = cc.comm
+    info = describe(filename, comm)
+    attrs, datasets = info['attrs'], info['datasets']
+
+    log(label + ": file {}".format(filename))
+    log(label + ": on disk: type={} grid={} written by {}x{} on {} at {}, step={}".format(
+        attrs.get('type'), 'x'.join(str(g) for g in attrs.get('grid', [])),
+        attrs.get('platform', '?'), attrs.get('architecture', '?'), attrs.get('hostname', '?'),
+        attrs.get('date', '?'), attrs.get('step', 'not recorded')))
+    for name, (shape, dtype) in datasets.items():
+        log(label + ": on disk: dataset '{}' shape={} dtype={}".format(name, shape, dtype))
+
+    base = next((c for c in type(lattice).__mro__ if c in _LATTICE_TYPES), None)
+    want_grid = [int(g) * int(m) for g, m in zip(lattice.grid, cc.mpigrid)]
+    sites = int(np.prod(want_grid))
+    want_shape = (sites,) + tuple(int(x) for x in (
+        [lattice.Nd] if hasattr(lattice, 'Nd') else []) + ([lattice.N, lattice.N] if hasattr(lattice, 'N') else []))
+    log(label + ": to fill: {} (a {}) global grid={} on {} ranks ({}), expects dataset shape={}".format(
+        type(lattice).__name__, base.__name__ if base else '?', 'x'.join(map(str, want_grid)),
+        comm.Get_size(), 'x'.join(map(str, cc.mpigrid)), want_shape))
+
+    problems = []
+    if base is None or str(attrs.get('type')).rstrip("'>").split('.')[-1] != base.__name__:
+        problems.append("type on disk is {}, the field to fill is a {}".format(
+            attrs.get('type'), base.__name__ if base else type(lattice).__name__))
+    if [int(g) for g in attrs.get('grid', [])] != want_grid:
+        problems.append("global grid on disk is {}, the field has {}".format(
+            'x'.join(str(g) for g in attrs.get('grid', [])), 'x'.join(map(str, want_grid))))
+    if 'value' not in datasets:
+        problems.append("there is no dataset 'value' in the file")
+    elif datasets['value'][0] != want_shape:
+        problems.append("dataset 'value' has shape {}, expected {}".format(datasets['value'][0], want_shape))
+    if problems:
+        raise ValueError("cannot restart from '{}': {}".format(filename, '; '.join(problems)))
+    log(label + ": the structure on disk matches the field: reading")
+
+    loaded = Reader(cartesiancomm=cc).read(filename)
+    lattice.value[...] = loaded.value
+    comm.Barrier()
+    log(label + ": configuration loaded ({} sites)".format(sites))
+    return attrs.get('step')
+
+
+def restore_rng(rng, filename, comm, mpigrid, log=None):
+    """Puts the random number generator of this rank back in the state it had when `filename` was saved
+    (by a Checkpointer), so that the run continues exactly as it would have without stopping. Returns True
+    if the state was restored. A collective call.
+
+    It needs the same layout of ranks as the run that wrote the file (each rank has its own stream); with a
+    different layout, or a file that has no state, the generator is left as it is, with a warning in `log`,
+    and the continuation is a valid run but not the same one.
+    """
+    import json
+    log = log if log is not None else (lambda line: None)
+    attrs = describe(filename, comm)['attrs']
+    if 'rng_states' not in attrs:
+        log("restart: WARNING: the file has no random state: the random numbers start afresh")
+        return False
+    saved = [int(m) for m in attrs['rng_mpigrid']]
+    if saved != [int(m) for m in mpigrid]:
+        log("restart: WARNING: the random state was saved on ranks {} and this run has {}: each rank has "
+            "its own stream, so the random numbers start afresh".format(
+                'x'.join(map(str, saved)), 'x'.join(str(int(m)) for m in mpigrid)))
+        return False
+    states = json.loads(attrs['rng_states'])
+    state = states[comm.Get_rank()]
+    if state['bit_generator'] != type(rng.bit_generator).__name__:
+        raise ValueError("the random state on disk is of a {}, this run uses a {}".format(
+            state['bit_generator'], type(rng.bit_generator).__name__))
+    rng.bit_generator.state = state
+    log("restart: random state of the {} ranks restored ({}): the run continues deterministically".format(
+        len(states), state['bit_generator']))
+    return True

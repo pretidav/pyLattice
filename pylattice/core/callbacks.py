@@ -38,17 +38,21 @@ class Checkpointer:
     keep       keep only the newest `keep` checkpoints (default: all)
     final      also save after the last sweep, if it is not a checkpoint already
     lattice    function model -> the lattice to save (default: model.field)
+    rng        function model -> the numpy Generator of this rank (default: model.rng, if it has one)
 
-    Saving needs h5py built with parallel HDF5 (see the README). Only the configuration is saved,
-    not the state of the random number generators, so a restart is not bit-for-bit the same run.
+    Saving needs h5py built with parallel HDF5 (see the README). The file holds the configuration and
+    the state of the random number generator of every rank (the attribute `rng_states`, JSON, with the
+    rank layout it belongs to), so a restart on the same layout (pylattice.core.hdf5io.restore_rng)
+    continues the run exactly: the same numbers, bit for bit, as if it had never stopped.
     """
 
-    def __init__(self, every, directory='checkpoints', prefix='config', keep=None, final=False, lattice=None):
+    def __init__(self, every, directory='checkpoints', prefix='config', keep=None, final=False, lattice=None, rng=None):
         self.every = _check_every(every)
         if keep is not None and keep < 1:
             raise ValueError("keep must be at least 1, got {}".format(keep))
         self.directory, self.prefix, self.keep, self.final = directory, prefix, keep, final
         self.lattice = lattice if lattice is not None else self._field
+        self.rng = rng if rng is not None else (lambda model: getattr(model, 'rng', None))
         self.last = None                                  # step of the last checkpoint
 
     @staticmethod
@@ -89,10 +93,15 @@ class Checkpointer:
         final = self.path(step)
         partial = final[:-len('.hdf5')] + '.partial.hdf5'
         Writer(lattice=lattice, cartesiancomm=cartesiancomm).write(filename=partial)
+        generator = self.rng(model)
+        states = comm.gather(generator.bit_generator.state if generator is not None else None, root=0)
         comm.Barrier()                                       # the file is closed on every rank
         if comm.Get_rank() == 0:
             with h5py.File(partial, 'r+') as f:
                 f.attrs['step'] = step
+                if generator is not None:
+                    f.attrs['rng_states'] = json.dumps(states)           # one state per rank, in rank order
+                    f.attrs['rng_mpigrid'] = np.asarray(cartesiancomm.mpigrid, dtype=int)
             os.replace(partial, final)
             self._prune()
         comm.Barrier()

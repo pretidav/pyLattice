@@ -28,7 +28,7 @@ def test_defaults():
     assert type(P.steps) is int and type(P.beta) is float and type(P.seed) is int
     assert P.checkpoint_every == 0 and P.runlog_every == 0                  # both off by default
     assert P.args == {'grid': [4, 4], 'mpigrid': [1, 2], 'steps': 100, 'beta': 0.5, 'seed': 0,
-                      'checkpoint_every': 0, 'runlog_every': 0, 'debug': False, 'logfile': False}
+                      'checkpoint_every': 0, 'runlog_every': 0, 'start_from': None, 'debug': False, 'logfile': False}
 
 
 def test_readme_command_line():
@@ -307,3 +307,21 @@ def test_brackets_in_messages_are_not_rich_markup():
     c = console(color=False)
     Logger(debug=False, logfile=False, console=c, rank=0, size=1).log.info('grid [4, 4] [bold]kept[/bold]')
     assert 'grid [4, 4] [bold]kept[/bold]' in text(c)
+
+
+# ------------------------------------------------------------------ logo and run information
+def test_banner_has_the_logo_and_the_run_and_system_information(tmp_path):
+    import logging
+    from pylattice.core.cli import LOGO, log_banner, run_info
+    p = Parser(['--grid=4x6', '--mpigrid=1x1', '--beta=0.7', '--steps=33', '--seed=5'])
+    lg = Logger(debug=False, logfile=True, filename=str(tmp_path / 'run.log'), rank=0, size=1)
+    log_banner(lg.log, p)
+    for h in lg.log.handlers:
+        h.flush()
+    text = (tmp_path / 'run.log').read_text()
+    assert 'pyLattice' in text and LOGO.splitlines()[2].rstrip() in text
+    for needle in ('os ', 'architecture', 'mpi ranks', 'python', 'numpy', 'h5py', 'local grid',
+                   '4x6', 'global lattice', '24 sites', '0.7', '33', 'seed'):
+        assert needle in text, needle
+    sections = dict(run_info(p))
+    assert dict(sections['lattice'])['global lattice'].startswith('4x6')

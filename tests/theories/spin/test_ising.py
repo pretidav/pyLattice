@@ -370,27 +370,6 @@ def test_progress_bar_only_on_rank_zero():
     assert (('MONTE CARLO' in out.getvalue() and '3/3' in out.getvalue()) if cc.rank == 0 else out.getvalue() == '')
 
 
-def test_plot_mc_writes_the_figures():
-    cc, loc = setup([4, 4])
-    model = IsingModel(field=IsingField(grid=loc, cartesiancomm=cc), logger=None, beta=0.4)
-    with in_tempdir():
-        with quiet():
-            model.run_mc(steps=5, online_obs=True, progress=False)
-            model.plot_mc()
-        for name in ('mag.png', 'ene.png', 'acc.png'):
-            if cc.rank == 0:
-                with open(name, 'rb') as f:
-                    assert f.read(8) == b'\x89PNG\r\n\x1a\n' and os.path.getsize(name) > 5000
-            else:
-                assert not os.path.exists(name)                                             # only rank 0 plots
-    with in_tempdir():                                                                      # nothing recorded: no plots
-        fresh = IsingModel(field=IsingField(grid=loc, cartesiancomm=cc), logger=None, beta=0.4)
-        with quiet() as out:
-            fresh.plot_mc()
-        assert os.listdir('.') == []
-        assert ('NO PLOTS' in out.getvalue()) == (cc.rank == 0)
-
-
 def parallel_hdf5():
     try:
         import h5py
@@ -436,8 +415,7 @@ def test_command_line_driver():
         with quiet() as out:
             main(argv)
         if cc.rank == 0:
-            assert all(os.path.getsize(f) > 5000 for f in ('mag.png', 'ene.png', 'acc.png'))
-            assert 'saved to ./mag.png' in out.getvalue() and 'MONTE CARLO' in out.getvalue()
+            assert 'MONTE CARLO' in out.getvalue() and not any(f.endswith('.png') for f in os.listdir('.'))   # the run plots nothing
             records = json.load(open('meas.json'))['measurements']                              # written as the run went on
             assert [r['sweep'] for r in records] == [0, 1, 2, 3, 4] and set(records[1]) == {'sweep', 'm', 'e', 'acceptance'}
             assert records[0]['acceptance'] is None and all(0 <= r['acceptance'] <= 1 for r in records[1:])
@@ -446,6 +424,136 @@ def test_command_line_driver():
     with quiet(), pytest.raises(SystemExit) as exc:                                         # a bad command line stops early
         main(['--grid=4x4', '--mpigrid=2x2x2'])
     assert exc.value.code == 2
+
+
+# ------------------------------------------------------------------------------ restart
+def _parallel_hdf5():
+    try:
+        import h5py
+        return bool(h5py.get_config().mpi)
+    except ImportError:
+        return False
+
+
+@contextlib.contextmanager
+def _shared_tempdir():
+    comm = MPI.COMM_WORLD
+    path = comm.bcast(tempfile.mkdtemp() if comm.Get_rank() == 0 else None, root=0)
+    try:
+        yield path
+    finally:
+        comm.Barrier()
+        if comm.Get_rank() == 0:
+            shutil.rmtree(path, ignore_errors=True)
+
+
+needs_hdf5 = pytest.mark.skipif(not _parallel_hdf5(), reason='h5py with parallel HDF5 is not installed')
+
+
+@needs_hdf5
+def test_restart_gives_back_the_saved_configuration_and_logs_the_structure():
+    from pylattice.core.hdf5io import Writer
+    glob = random_config((8, 4), 11)
+    cc, loc, field, _ = make(glob)
+    with _shared_tempdir() as d:
+        path = os.path.join(d, 'conf.hdf5')
+        Writer(lattice=field, cartesiancomm=cc).write(path)
+        new = IsingField(grid=loc, cartesiancomm=cc, initialization='cold')
+        lines = []
+        new.load(path, log=lines.append)
+        assert np.array_equal(to_global(cc, loc, new.value), glob)
+        text = '\n'.join(lines)
+        for needle in ('type=LatticeReal', 'grid=8x4', "dataset 'value' shape=(32,)", 'float32',
+                       'IsingField', 'matches', 'loaded (32 sites)', '+1 or -1'):
+            assert needle in text, needle
+        model = IsingModel(field=new, logger=None, beta=0.5)           # a model on the loaded field
+        assert np.isclose(model.magnetization(), glob.mean())
+
+
+@needs_hdf5
+def test_restart_refuses_a_file_that_does_not_match_the_field():
+    from pylattice.core.hdf5io import Writer
+    cc, loc, field, _ = make(random_config((8, 4), 12))
+    with _shared_tempdir() as d:
+        path = os.path.join(d, 'conf.hdf5')
+        Writer(lattice=field, cartesiancomm=cc).write(path)
+        cc2, loc2 = setup([4, 8])                                      # another global lattice
+        other = IsingField(grid=loc2, cartesiancomm=cc2, initialization='cold')
+        with pytest.raises(ValueError, match='global grid on disk is 8x4, the field has 4x8'):
+            other.load(path)
+        assert np.all(other.value == -1)                               # untouched
+        vec = LatticeVectorReal(grid=loc, cartesiancomm=cc, Nd=2)       # another kind of field
+        with pytest.raises(ValueError, match='type on disk is LatticeReal'):
+            from pylattice.core.hdf5io import load_into
+            load_into(vec, path)
+        notspins = LatticeReal(grid=loc, cartesiancomm=cc)
+        notspins.value[:] = 0.5
+        Writer(lattice=notspins, cartesiancomm=cc).write(os.path.join(d, 'x.hdf5'))
+        with pytest.raises(ValueError, match='not an Ising configuration'):
+            field.load(os.path.join(d, 'x.hdf5'))
+        assert set(np.unique(field.value)) <= {-1.0, 1.0}              # the spins are back as they were
+        with pytest.raises(OSError, match='cannot read'):
+            field.load(os.path.join(d, 'missing.hdf5'))
+
+
+@needs_hdf5
+def test_restart_continues_the_run_exactly_with_the_random_state():
+    from pylattice.core.callbacks import Checkpointer
+    cc, loc = setup([8, 4])
+
+    def start(seed):
+        rng = cc.rng(seed)
+        field = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=rng)
+        return field, IsingModel(field=field, logger=None, beta=0.4, rng=rng), rng
+
+    with _shared_tempdir() as d:
+        field, model, rng = start(3)
+        model.run_mc(steps=10, progress=False, callbacks=[Checkpointer(5, directory=d, prefix='c')])
+        straight = to_global(cc, loc, field.value)                 # sweeps 1..10 without stopping
+        path = os.path.join(d, 'c_00000005.hdf5')
+
+        field2, _, rng2 = start(99)                                # other seed: everything must come from the file
+        lines = []
+        field2.load(path, log=lines.append, rng=rng2)
+        assert any('continues deterministically' in line for line in lines)
+        model2 = IsingModel(field=field2, logger=None, beta=0.4, rng=rng2)
+        model2.run_mc(steps=5, progress=False)                     # sweeps 6..10
+        assert np.array_equal(to_global(cc, loc, field2.value), straight)
+
+        field3, _, rng3 = start(99)                                # without the random state it is another run
+        field3.load(path)
+        IsingModel(field=field3, logger=None, beta=0.4, rng=rng3).run_mc(steps=5, progress=False)
+        assert not np.array_equal(to_global(cc, loc, field3.value), straight)
+
+
+@needs_hdf5
+def test_restart_random_state_warns_when_it_cannot_be_restored():
+    from pylattice.core.callbacks import Checkpointer
+    from pylattice.core.hdf5io import Writer, restore_rng
+    cc, loc = setup([8, 4])
+    rng = cc.rng(1)
+    field = IsingField(grid=loc, cartesiancomm=cc, initialization='random', seed=rng)
+    model = IsingModel(field=field, logger=None, beta=0.4, rng=rng)
+    with _shared_tempdir() as d:
+        path = Checkpointer(1, directory=d, prefix='c').save(model, 1)
+        lines = []
+        before = rng.bit_generator.state
+        assert not restore_rng(rng, path, cc.comm, [3, 7], lines.append)           # another layout of ranks
+        assert 'WARNING' in lines[-1] and 'start afresh' in lines[-1] and rng.bit_generator.state == before
+        plain = os.path.join(d, 'plain.hdf5')
+        Writer(lattice=field, cartesiancomm=cc).write(plain)                      # a file without random state
+        assert not restore_rng(rng, plain, cc.comm, cc.mpigrid, lines.append)
+        assert 'no random state' in lines[-1]
+        rng.random(5)                                                              # the state moves on...
+        assert restore_rng(rng, path, cc.comm, cc.mpigrid)                         # ...and comes back
+        assert rng.bit_generator.state == before
+
+
+def test_start_from_must_be_an_existing_file():
+    from pylattice.core.cli import Parser
+    with quiet(), pytest.raises(SystemExit):
+        Parser(['--start-from=/no/such/file.hdf5'])
+    assert Parser([]).start_from is None
 
 
 if __name__ == '__main__':

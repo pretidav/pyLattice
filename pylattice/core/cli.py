@@ -1,10 +1,16 @@
 import argparse
 import logging
 import math
+import os
+import platform
+import socket
+import subprocess
+import sys
+import time
 
 from rich.logging import RichHandler
 
-"""
+LOGO = r"""
 __| |_________| |__
 __   _________   __
   | |         | |  
@@ -68,6 +74,7 @@ class Parser():
         self.steps = self.args['steps']
         self.checkpoint_every = self.args['checkpoint_every']
         self.runlog_every = self.args['runlog_every']
+        self.start_from = self.args['start_from']
 
     def parser(self, argv=None):
         parser = argparse.ArgumentParser(
@@ -87,11 +94,17 @@ class Parser():
         parser.add_argument('--runlog-every', type=_every, default=0, metavar='N',
                             help='write a line to ./run.log every N sweeps: step, observables, memory, '
                                  'cpu, sweeps per second (0: never)')
+        parser.add_argument('--start-from', default=None, metavar='FILE.hdf5',
+                            help='start from the configuration saved in this HDF5 file (a checkpoint) instead '
+                                 'of a random one; its lattice must match --grid x --mpigrid, the layout '
+                                 'of the ranks may differ')
         parser.add_argument('--debug', action='store_true',
                             help='log at DEBUG level, from every rank')
         parser.add_argument('--logfile', action='store_true',
                             help='also write the log to a file (see Logger)')
         args = vars(parser.parse_args(argv))
+        if args['start_from'] is not None and not os.path.isfile(args['start_from']):
+            parser.error('--start-from: no such file: {}'.format(args['start_from']))
         if len(args['grid']) != len(args['mpigrid']):
             parser.error('--grid has {} dimensions but --mpigrid has {}'.format(
                 len(args['grid']), len(args['mpigrid'])))
@@ -178,3 +191,117 @@ class Logger():
             file_handler.addFilter(rank_filter)
             logger.addHandler(file_handler)
         return logger
+
+
+def _version(module):
+    try:
+        return __import__(module).__version__
+    except Exception:
+        return 'not installed'
+
+
+def _git_revision():
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        run = lambda *a: subprocess.run(('git',) + a, cwd=here, capture_output=True, text=True, timeout=5).stdout.strip()
+        revision = run('rev-parse', '--short', 'HEAD')
+        if not revision:
+            return 'unknown'
+        return revision + (' (uncommitted changes)' if run('status', '--porcelain') else '')
+    except Exception:
+        return 'unknown'
+
+
+def run_info(parser=None, comm=None, argv=None):
+    """The information on the run and the system, as a list of (section, [(name, value), ...]).
+
+    parser  the Parser of the run: its arguments and the size of the lattice are listed
+    comm    the MPI communicator (default COMM_WORLD). This is a collective call: every rank must make it,
+            because the hosts of all the ranks are gathered.
+    """
+    from mpi4py import MPI
+    comm = comm if comm is not None else MPI.COMM_WORLD
+    hosts = {}
+    for rank, host in enumerate(comm.allgather(socket.gethostname())):
+        hosts.setdefault(host, []).append(rank)
+
+    try:
+        import psutil
+        memory = '{:.1f} GB'.format(psutil.virtual_memory().total / 2 ** 30)
+    except Exception:
+        memory = 'unknown'
+    try:
+        import h5py
+        h5 = '{} (HDF5 {}, parallel: {})'.format(h5py.__version__, h5py.version.hdf5_version, h5py.get_config().mpi)
+    except Exception:
+        h5 = 'not installed'
+    mpi = MPI.Get_library_version().strip().split(',')[0].strip()      # e.g. 'Open MPI v5.0.11'
+
+    system = [
+        ('started', time.strftime('%Y-%m-%d %H:%M:%S')),
+        ('hosts', '; '.join('{} (ranks {})'.format(h, _ranges(r)) for h, r in hosts.items())),
+        ('os', platform.platform()),
+        ('architecture', '{} ({})'.format(platform.machine(), platform.processor() or 'unknown processor')),
+        ('cpu cores', '{} on this host'.format(os.cpu_count())),
+        ('memory', memory + ' on this host'),
+        ('python', platform.python_version()),
+        ('numpy', _version('numpy')),
+        ('mpi4py', '{} / {}'.format(_version('mpi4py'), mpi)),
+        ('h5py', h5),
+        ('pylattice', 'git ' + _git_revision()),
+        ('command', ' '.join(['python', '-m', 'pylattice'] + list(sys.argv[1:] if argv is None else argv))),
+        ('directory', os.getcwd()),
+    ]
+    sections = [('system', system), ('parallel', [
+        ('mpi ranks', comm.Get_size()),
+        ('threads', os.environ.get('OMP_NUM_THREADS', 'not set (OMP_NUM_THREADS)')),
+    ])]
+    if parser is not None:
+        grid, mpigrid = parser.grid, parser.mpigrid
+        total = [g * m for g, m in zip(grid, mpigrid)]
+        sites = math.prod(total)
+        sections.append(('lattice', [
+            ('local grid (per rank)', 'x'.join(map(str, grid))),
+            ('mpigrid', 'x'.join(map(str, mpigrid))),
+            ('global lattice', '{} = {} sites'.format('x'.join(map(str, total)), sites)),
+            ('sites per rank', math.prod(grid)),
+        ]))
+        sections.append(('run', [
+            ('beta', parser.beta),
+            ('steps', parser.steps),
+            ('seed', '{} (one independent stream per rank)'.format(parser.seed)),
+            ('start from', parser.start_from or 'random configuration'),
+            ('checkpoint every', parser.checkpoint_every or 'off'),
+            ('run log every', parser.runlog_every or 'off'),
+            ('debug', parser.debug),
+            ('log file', 'pylattice.log' if parser.logfile else 'off'),
+            ('measurements', 'meas.json'),
+        ]))
+    return sections
+
+
+def _ranges(ranks):
+    """[0, 1, 2, 5] -> '0-2, 5'"""
+    out, start = [], 0
+    for i in range(1, len(ranks) + 1):
+        if i == len(ranks) or ranks[i] != ranks[i - 1] + 1:
+            a, b = ranks[start], ranks[i - 1]
+            out.append(str(a) if a == b else '{}-{}'.format(a, b))
+            start = i
+    return ', '.join(out)
+
+
+def format_run_info(sections):
+    width = max(len(str(name)) for _, items in sections for name, _ in items)
+    lines = []
+    for title, items in sections:
+        lines.append('--- {} ---'.format(title))
+        lines.extend('  {:<{w}} : {}'.format(name, value, w=width) for name, value in items)
+    return '\n'.join(lines)
+
+
+def log_banner(logger, parser=None, comm=None):
+    """Logs the logo and the information of run_info(). Call it on every rank (collective); the
+    logger lets only rank 0 speak, unless debug is on."""
+    info = format_run_info(run_info(parser, comm))
+    logger.info(LOGO.rstrip() + '\n\n' + info + '\n')

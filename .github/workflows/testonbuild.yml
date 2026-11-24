@@ -48,5 +48,9 @@ jobs:
         run:  pytest tests/theories/spin/test_ising.py
       - name: Run test Ising in parallel
         run:  mpiexec -n 2 python tests/theories/spin/test_ising.py
-
-
+      - name: Run test Ising offline measurements
+        run:  pytest tests/theories/spin/test_ising_meas.py
+      - name: Run test Ising offline measurements in parallel
+        run:  mpiexec -n 2 python tests/theories/spin/test_ising_meas.py
+      - name: Run test plot_meas
+        run:  pytest tests/utils/test_plot_meas.py

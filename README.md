@@ -49,6 +49,28 @@ It is valid JSON at every moment (`json.load(open('meas.json'))['measurements']`
 `pandas.DataFrame(...)`); the sweep counts from the end of the thermalization, and `acceptance` is
 that of the sweeps since the previous measurement. An existing `meas.json` is overwritten.
 
+The run itself plots nothing: it produces configurations and `meas.json`. Look at the measurements offline,
+while the run goes on or after it:
+
+~~~
+python -m pylattice.utils.plot_meas meas.json --skip 200 --outdir figures   # --no-plot: only the table
+~~~
+
+Measurements can also be made afterwards on stored configurations (the checkpoints), without running
+any Monte Carlo; each file is first checked to be an Ising configuration of the right lattice, and the
+structure found is logged:
+
+~~~
+mpiexec -np 4 python -m pylattice.theories.spin.ising_meas checkpoints/ising_*.hdf5 --mpigrid=2x2 --out meas_offline.json
+~~~
+
+It writes the same kind of `meas.json` (sweep = the step of the checkpoint, no acceptance) with `m`,
+`abs_m`, `m2`, `e`, `e2` per site, in the order of the steps; the layout of the ranks may differ from the
+run's. Other theories plug into `pylattice.core.measure.measure_files` with their own `measure(path)`.
+
+`plot_meas` prints, for every observable and the acceptance, the mean, its error and the integrated
+autocorrelation time, and writes one figure per quantity (`figures/m.png`, ...).
+
 Two options, both off by default, record the run (they need `--steps` sweeps to be longer than the interval):
 
 ~~~
@@ -58,6 +80,13 @@ mpiexec -np 4 python -m pylattice.theories.spin.ising --grid=20x20 --mpigrid=2x2
 
 - `--checkpoint-every N` saves the configuration (parallel HDF5, read it with `pylattice.core.hdf5io.Reader`)
   to `checkpoints/ising_<sweep>.hdf5` every N sweeps and at the end.
+- `--start-from FILE.hdf5` starts from a saved configuration (e.g. `checkpoints/ising_00000500.hdf5`)
+  instead of a random one. The log shows what is on disk (type, lattice, dataset shape and dtype, who
+  wrote it and when) and what is being filled, and the run stops with a message if they differ. The
+  lattice must be the same (`--grid` x `--mpigrid`). Checkpoints also hold the random state of every rank:
+  restarting on the same rank layout continues the run exactly (bit for bit, as if it had not stopped);
+  on another layout the configuration is loaded but the random numbers start afresh (the log warns).
+  The sweep counter and `meas.json` start afresh.
 - `--seed S` fixes the run: every rank draws from its own independent stream of `S`
   (`pylattice.core.rng`, numpy `SeedSequence`), so a run is reproducible for a given seed and rank layout.
 - `--runlog-every N` appends a line to `run.log` every N sweeps:
