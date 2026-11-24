@@ -16,14 +16,14 @@ from pylattice.core.grid import LatticeComplex, LatticeReal, LatticeComplexMatri
 
 # the same definitions as in test_hdf5io_w.py
 GLOBAL = [4, 4, 4]
-TYPES = [('LatticeReal', LatticeReal, {}, (), 'float32'),
-         ('LatticeComplex', LatticeComplex, {}, (), 'complex64'),
-         ('LatticeRealMatrix', LatticeRealMatrix, {'N': 2}, (2, 2), 'float32'),
-         ('LatticeComplexMatrix', LatticeComplexMatrix, {'N': 2}, (2, 2), 'complex64'),
-         ('LatticeVectorReal', LatticeVectorReal, {'Nd': 3}, (3,), 'float32'),
-         ('LatticeVectorComplex', LatticeVectorComplex, {'Nd': 3}, (3,), 'complex64'),
-         ('LatticeVectorRealMatrix', LatticeVectorRealMatrix, {'Nd': 3, 'N': 2}, (3, 2, 2), 'float32'),
-         ('LatticeVectorComplexMatrix', LatticeVectorComplexMatrix, {'Nd': 3, 'N': 2}, (3, 2, 2), 'complex64')]
+TYPES = [('LatticeReal', LatticeReal, {}, (), 'float64'),
+         ('LatticeComplex', LatticeComplex, {}, (), 'complex128'),
+         ('LatticeRealMatrix', LatticeRealMatrix, {'N': 2}, (2, 2), 'float64'),
+         ('LatticeComplexMatrix', LatticeComplexMatrix, {'N': 2}, (2, 2), 'complex128'),
+         ('LatticeVectorReal', LatticeVectorReal, {'Nd': 3}, (3,), 'float64'),
+         ('LatticeVectorComplex', LatticeVectorComplex, {'Nd': 3}, (3,), 'complex128'),
+         ('LatticeVectorRealMatrix', LatticeVectorRealMatrix, {'Nd': 3, 'N': 2}, (3, 2, 2), 'float64'),
+         ('LatticeVectorComplexMatrix', LatticeVectorComplexMatrix, {'Nd': 3, 'N': 2}, (3, 2, 2), 'complex128')]
 PREFIX = './test_file_cross_'
 
 
@@ -56,11 +56,11 @@ def test_read():
             problems.append('{}: sizes {} instead of {}'.format(name, {k: getattr(Lattice, k) for k in kw}, kw))
     # the file written under a name that already ended in .hdf5 is read with that name as it is
     Lattice = Reader(cartesiancomm=CC).read(filename=PREFIX + 'ext.hdf5')
-    if not np.array_equal(Lattice.value, global_field((), 'float32')[block].reshape(-1)):
+    if not np.array_equal(Lattice.value, global_field((), 'float64')[block].reshape(-1)):
         problems.append('LatticeReal: values read from a name ending in .hdf5 differ')
     # the file with the full class path in its header, as older versions wrote it
     Lattice = Reader(cartesiancomm=CC).read(filename=PREFIX + 'legacy')
-    if type(Lattice) is not LatticeReal or not np.array_equal(Lattice.value, global_field((), 'float32')[block].reshape(-1)):
+    if type(Lattice) is not LatticeReal or not np.array_equal(Lattice.value, global_field((), 'float64')[block].reshape(-1)):
         problems.append('LatticeReal: a file with the old-style type attribute is not read back')
     allproblems = CC.comm.allgather(problems)                   # every rank fails together
     allproblems = [p for rank, ps in enumerate(allproblems) for p in ['rank {}: {}'.format(rank, q) for q in ps]]

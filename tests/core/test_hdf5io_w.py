@@ -21,14 +21,14 @@ from pylattice.core.grid import LatticeComplex, LatticeReal, LatticeComplexMatri
 
 GLOBAL = [4, 4, 4]
 # name, class, constructor arguments, shape of the value at one site, dtype
-TYPES = [('LatticeReal', LatticeReal, {}, (), 'float32'),
-         ('LatticeComplex', LatticeComplex, {}, (), 'complex64'),
-         ('LatticeRealMatrix', LatticeRealMatrix, {'N': 2}, (2, 2), 'float32'),
-         ('LatticeComplexMatrix', LatticeComplexMatrix, {'N': 2}, (2, 2), 'complex64'),
-         ('LatticeVectorReal', LatticeVectorReal, {'Nd': 3}, (3,), 'float32'),
-         ('LatticeVectorComplex', LatticeVectorComplex, {'Nd': 3}, (3,), 'complex64'),
-         ('LatticeVectorRealMatrix', LatticeVectorRealMatrix, {'Nd': 3, 'N': 2}, (3, 2, 2), 'float32'),
-         ('LatticeVectorComplexMatrix', LatticeVectorComplexMatrix, {'Nd': 3, 'N': 2}, (3, 2, 2), 'complex64')]
+TYPES = [('LatticeReal', LatticeReal, {}, (), 'float64'),
+         ('LatticeComplex', LatticeComplex, {}, (), 'complex128'),
+         ('LatticeRealMatrix', LatticeRealMatrix, {'N': 2}, (2, 2), 'float64'),
+         ('LatticeComplexMatrix', LatticeComplexMatrix, {'N': 2}, (2, 2), 'complex128'),
+         ('LatticeVectorReal', LatticeVectorReal, {'Nd': 3}, (3,), 'float64'),
+         ('LatticeVectorComplex', LatticeVectorComplex, {'Nd': 3}, (3,), 'complex128'),
+         ('LatticeVectorRealMatrix', LatticeVectorRealMatrix, {'Nd': 3, 'N': 2}, (3, 2, 2), 'float64'),
+         ('LatticeVectorComplexMatrix', LatticeVectorComplexMatrix, {'Nd': 3, 'N': 2}, (3, 2, 2), 'complex128')]
 PREFIX = './test_file_cross_'
 
 
@@ -55,7 +55,7 @@ def test_write():
         Writer(lattice=Lattice, cartesiancomm=CC).write(filename=PREFIX + name)
     # a filename that already ends in .hdf5 must be used as it is
     Lattice = LatticeReal(grid=grid, cartesiancomm=CC)
-    Lattice.fill_value(n=global_field((), 'float32')[local_block()].reshape(-1).copy())
+    Lattice.fill_value(n=global_field((), 'float64')[local_block()].reshape(-1).copy())
     Writer(lattice=Lattice, cartesiancomm=CC).write(filename=PREFIX + 'ext.hdf5')
     # a file as written by older versions, which stored the full class path in the header
     Writer(lattice=Lattice, cartesiancomm=CC).write(filename=PREFIX + 'legacy')

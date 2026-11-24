@@ -1,8 +1,8 @@
 """Measures Ising configurations that are stored on disk (the checkpoints of a run) and writes a
-meas.json, as a run does, so a measurement can be made again or on another set of configurations
+<run name>_meas_offline.json (the run name of the checkpoints: ising_grid<grid>_mpi<mpigrid>_b<beta>), as a run does, so a measurement can be made again or on another set of configurations
 without running the Monte Carlo:
 
-    mpiexec -np 4 python -m pylattice.theories.spin.ising_meas checkpoints/ising_*.hdf5 --mpigrid=2x2
+    mpiexec -np 4 python -m pylattice.theories.spin.ising_meas checkpoints/ising_grid10x10_mpi2x2_b1.5_*.hdf5 --mpigrid=2x2
 
 Every file is checked first against the Ising field to fill (type, global lattice, dataset, only
 spins +1 and -1) and the structure found is logged; a file that does not match stops the run, with
@@ -19,7 +19,7 @@ import math
 
 from mpi4py import MPI
 
-from pylattice.core.cli import Logger
+from pylattice.core.cli import Logger, offline_name
 from pylattice.core.hdf5io import describe
 from pylattice.core.measure import measure_files
 from pylattice.core.parallel import CartesianComm
@@ -43,17 +43,19 @@ def measure_ising(path, cartesiancomm, grid, log=None, beta=1.0):
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Measure Ising configurations stored in HDF5 files.',
                                      epilog='example: mpiexec -np 4 python -m pylattice.theories.spin.ising_meas '
-                                            'checkpoints/ising_*.hdf5 --mpigrid=2x2')
+                                            'checkpoints/ising_grid10x10_mpi2x2_b1.5_*.hdf5 --mpigrid=2x2')
     parser.add_argument('files', nargs='+', metavar='FILE.hdf5', help='configurations (checkpoints) to measure')
     parser.add_argument('--mpigrid', default=None, help='number of ranks along each direction, AxBx... '
                         '(default: all the ranks along the first direction)')
-    parser.add_argument('--out', default='meas.json', help='the measurements file')
+    parser.add_argument('--out', default=None, help='the measurements file (default: the common run name of the files '
+                                                    'followed by _meas_offline.json)')
     parser.add_argument('--debug', action='store_true', help='log at DEBUG level, from every rank')
-    parser.add_argument('--logfile', action='store_true', help='also write the log to pylattice.log')
+    parser.add_argument('--logfile', action='store_true', help='also write the log, to <run name>_meas_offline.log')
     args = parser.parse_args(argv)
 
     comm = MPI.COMM_WORLD
-    log = Logger(debug=args.debug, logfile=args.logfile).log
+    out = args.out or offline_name(args.files) + '.json'
+    log = Logger(debug=args.debug, logfile=args.logfile, filename=offline_name(args.files) + '.log').log
     try:
         attrs = describe(args.files[0], comm)['attrs']
         total = [int(g) for g in attrs['grid']]
@@ -69,14 +71,14 @@ def main(argv=None):
         cartesiancomm = CartesianComm(mpigrid=mpigrid)
         log.info("lattice {} on {} ranks ({}), local grid {}; {} files; output {}".format(
             'x'.join(map(str, total)), comm.Get_size(), 'x'.join(map(str, mpigrid)),
-            'x'.join(map(str, grid)), len(args.files), args.out))
+            'x'.join(map(str, grid)), len(args.files), out))
         measure_files(args.files, lambda path: measure_ising(path, cartesiancomm, grid, log.info),
-                      comm, filename=args.out, log=log.info)
+                      comm, filename=out, log=log.info)
     except (ValueError, OSError, KeyError) as error:
         log.error(str(error))
         comm.Barrier()
         raise SystemExit(1)
-    log.info('done: print and plot with: python -m pylattice.utils.plot_meas {}'.format(args.out))
+    log.info('done: print and plot with: python -m pylattice.utils.plot_meas {}'.format(out))
 
 
 if __name__ == '__main__':

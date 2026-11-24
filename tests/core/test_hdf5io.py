@@ -140,6 +140,84 @@ def test_latticesubclass():
     with pytest.raises(TypeError):                              # something that is not a lattice
         Writer(lattice=NotALattice(), cartesiancomm=CC).write_header(file=FakeFile())
 
+def full_precision(shape, seed, cplx):
+    x = np.random.default_rng(seed).standard_normal(shape)
+    return (x + 1j * np.random.default_rng(seed + 1).standard_normal(shape)) if cplx else x
+
+
+def test_double_precision_is_kept_on_disk_and_read_back_exactly():
+    import h5py
+    for cls, kwargs, cplx in ((LatticeComplex, {}, True), (LatticeReal, {}, False),
+                              (LatticeVectorComplexMatrix, dict(Nd=2, N=2), True)):
+        Lattice = cls(grid=grid, cartesiancomm=CC, **kwargs)
+        Lattice.value = full_precision(Lattice.value.shape, 10 + CC.rank, cplx).astype(complex if cplx else float)
+        Writer(lattice=Lattice, cartesiancomm=CC).write(filename='./test_file_double')
+        CC.comm.Barrier()
+        with h5py.File('./test_file_double.hdf5', 'r') as f:
+            assert f['value'].dtype == Lattice.value.dtype                        # not rounded to float32 / complex64
+        Lattice2 = Reader(cartesiancomm=CC).read(filename='./test_file_double')
+        assert Lattice2.value.dtype == Lattice.value.dtype
+        assert np.array_equal(Lattice.value, Lattice2.value)                     # bit for bit
+        CC.comm.Barrier()
+
+
+def test_the_file_has_the_precision_of_the_lattice_double_by_default_single_if_the_data_is():
+    import h5py
+    for cls, double, single in ((LatticeReal, 'float64', 'float32'), (LatticeComplex, 'complex128', 'complex64')):
+        for lattice_dtype, want in ((None, double), (single, single)):
+            Lattice = cls(grid=grid, cartesiancomm=CC)
+            if lattice_dtype:
+                Lattice.value = Lattice.value.astype(lattice_dtype)
+            assert Lattice.value.dtype == np.dtype(want)
+            Writer(lattice=Lattice, cartesiancomm=CC).write(filename='./test_file_single')
+            CC.comm.Barrier()
+            with h5py.File('./test_file_single.hdf5', 'r') as f:
+                assert f['value'].dtype == np.dtype(want)
+            Lattice2 = Reader(cartesiancomm=CC).read(filename='./test_file_single')
+            assert Lattice2.value.dtype == np.dtype(want)
+            CC.comm.Barrier()
+
+
+def test_integer_lattices_are_written_and_read_back_as_integers_other_types_cannot():
+    import h5py
+    for dtype in ('int8', 'int64'):
+        Lattice = LatticeReal(grid=grid, cartesiancomm=CC)
+        Lattice.value = (np.arange(Lattice.value.size) % 3 - 1 + CC.rank).astype(dtype)
+        Writer(lattice=Lattice, cartesiancomm=CC).write(filename='./test_file_int')
+        CC.comm.Barrier()
+        with h5py.File('./test_file_int.hdf5', 'r') as f:
+            assert f['value'].dtype == np.dtype(dtype)
+        Lattice2 = Reader(cartesiancomm=CC).read(filename='./test_file_int')
+        assert Lattice2.value.dtype == np.dtype(dtype) and np.array_equal(Lattice2.value, Lattice.value)
+        CC.comm.Barrier()
+    Lattice.value = Lattice.value.astype(bool)
+    with pytest.raises(TypeError, match='cannot write'):
+        Writer(lattice=Lattice, cartesiancomm=CC).write(filename='./test_file_bool')
+
+
+def test_load_into_keeps_double_precision_and_warns_about_a_file_rounded_when_written():
+    from pylattice.core.hdf5io import load_into
+    Lattice = LatticeComplex(grid=grid, cartesiancomm=CC)
+    Lattice.value = full_precision(Lattice.value.shape, 20 + CC.rank, True).astype(complex)
+    Writer(lattice=Lattice, cartesiancomm=CC).write(filename='./test_file_double')
+    CC.comm.Barrier()
+    target, lines = LatticeComplex(grid=grid, cartesiancomm=CC), []
+    target.value = np.zeros(target.value.shape, dtype=complex)
+    load_into(target, './test_file_double.hdf5', log=lines.append)
+    assert np.array_equal(target.value, Lattice.value)
+    assert not any('WARNING' in l for l in lines) and any('complex128' in l for l in lines)
+    single = LatticeComplex(grid=grid, cartesiancomm=CC)                           # a file written in single precision
+    single.value = Lattice.value.astype('complex64')
+    Writer(lattice=single, cartesiancomm=CC).write(filename='./test_file_single')
+    CC.comm.Barrier()
+    lines.clear()
+    load_into(target, './test_file_single.hdf5', log=lines.append)
+    assert any('WARNING' in l and 'rounded' in l for l in lines)
+    assert np.array_equal(target.value, single.value.astype(complex))              # what is on disk, exactly
+    real = LatticeReal(grid=grid, cartesiancomm=CC)                                # real numbers in a complex field: refused
+    with pytest.raises(ValueError):
+        load_into(real, './test_file_double.hdf5')
+
 
 if __name__=='__main__': 
     test_latticereal()
@@ -151,3 +229,7 @@ if __name__=='__main__':
     test_latticerealvectormatrix()
     test_latticecomplexvectormatrix()
     test_latticesubclass()
+    test_double_precision_is_kept_on_disk_and_read_back_exactly()
+    test_the_file_has_the_precision_of_the_lattice_double_by_default_single_if_the_data_is()
+    test_integer_lattices_are_written_and_read_back_as_integers_other_types_cannot()
+    test_load_into_keeps_double_precision_and_warns_about_a_file_rounded_when_written()

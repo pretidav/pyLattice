@@ -1,4 +1,4 @@
-from pylattice.core.parallel import CartesianComm, pprint
+from pylattice.core.parallel import CartesianComm, pprint, allsum
 from pylattice.core.grid import LatticeReal, LatticeComplex, LatticeRealMatrix, LatticeComplexMatrix, LatticeVectorReal, LatticeVectorComplex, LatticeVectorRealMatrix, LatticeVectorComplexMatrix
 from pylattice.core.tensors import RealMatrix, ComplexMatrix, VectorReal, VectorComplex, VectorRealMatrix, VectorComplexMatrix
 import numpy as np
@@ -355,7 +355,39 @@ def test_eo_shift(grid, comm):
         'x'.join([str(a) for a in grid]), 'x'.join([str(a) for a in comm.mpigrid])))
 
 
+def test_shifts_across_ranks_keep_double_precision_and_single_stays_single(grid, comm):
+    # values that differ from their single-precision rounding in the 12th digit: a halo that went through
+    # float32 / complex64 would change them
+    for cls, kw, dtype, shape in ((LatticeReal, {}, 'float64', ()), (LatticeComplex, {}, 'complex128', ()),
+                                  (LatticeVectorComplexMatrix, dict(Nd=2, N=2), 'complex128', (2, 2, 2)),
+                                  (LatticeReal, {}, 'float32', ())):
+        L = cls(grid=grid, cartesiancomm=comm, **kw)
+        n = int(np.prod(grid))
+        base = (1 + 1e-12 * (np.arange(n * int(np.prod(shape or (1,)))) + 1 + 1000 * comm.rank)).reshape((n,) + shape)
+        L.value = (base * (1 + 0.5j) if 'complex' in dtype else base).astype(dtype)
+        for mu in range(len(grid)):
+            fwd, bwd = L.shift_forward(mu), L.shift_backward(mu)
+            assert fwd.value.dtype == np.dtype(dtype) and bwd.value.dtype == np.dtype(dtype)
+            assert np.array_equal(fwd.shift_backward(mu).value, L.value)              # exactly back, no rounding
+            assert np.array_equal(bwd.shift_forward(mu).value, L.value)
+            if dtype in ('float64', 'complex128'):                                    # the halo kept the 1e-12 digits
+                halo = fwd.value.reshape(tuple(grid) + shape).take(-1, axis=mu)
+                assert np.abs(halo - halo.astype(np.complex64 if 'complex' in dtype else np.float32)).max() > 1e-13
+        assert L.reducesum().dtype == np.dtype(dtype)
+    pprint(comm=comm.comm, msg='[+] shifts and reductions in double precision on the ranks')
+
+
+def test_allsum_adds_over_the_ranks_and_keeps_integers_exact(comm):
+    total = allsum(comm.comm, [comm.rank + 1, 10 ** 12 + comm.rank])
+    assert list(total) == [sum(range(1, comm.size + 1)), comm.size * 10 ** 12 + sum(range(comm.size))]
+    assert allsum(comm.comm, 2.5) == 2.5 * comm.size
+
+
 if __name__ == '__main__':
+    from mpi4py import MPI
+    if MPI.COMM_WORLD.Get_size() != 2:                  # the rank grids below hold 2 ranks: any other number would hang
+        pprint(comm=MPI.COMM_WORLD, msg='[-] skipped: this script needs exactly 2 ranks (mpiexec -n 2)')
+        raise SystemExit(0)
     CC = CartesianComm(mpigrid=[2, 1])
     test_LatticeReal2D(grid=[3, 3], comm=CC)
     test_LatticeComplex2D(grid=[3, 3], comm=CC)
@@ -366,6 +398,9 @@ if __name__ == '__main__':
     test_LatticeRealVectorMatrix2D(grid=[3, 3], comm=CC)
     test_LatticeComplexVectorMatrix2D(grid=[3, 3], comm=CC)
     test_shift_direction(grid=[3, 3], comm=CC)
+
+    test_shifts_across_ranks_keep_double_precision_and_single_stays_single(grid=[3, 3], comm=CC)
+    test_allsum_adds_over_the_ranks_and_keeps_integers_exact(comm=CC)
 
     CC = CartesianComm(mpigrid=[2, 1, 1])
     test_LatticeReal3D(grid=[3, 3, 3], comm=CC)

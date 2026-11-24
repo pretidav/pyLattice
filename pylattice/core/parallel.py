@@ -48,6 +48,12 @@ def pplot(comm,x,y,title,file):
         plt.close(fig)
         print('plot: {} - saved to {}'.format(title,file))
 
+def allsum(comm, values):
+    """The element-wise sum over all the ranks of comm of a number or of a list / array of numbers (every rank
+    gets the result). The type of the numbers is kept: integer counts stay exact."""
+    return comm.allreduce(np.asarray(values), op=MPI.SUM)
+
+
 class CartesianComm():
     def __init__(self, mpigrid, periodicity=True):
         self.comm, self.size, self.rank = self.create_comm()
@@ -55,7 +61,8 @@ class CartesianComm():
         self.mpidim = len(self.mpigrid)
         self.periodicity = [periodicity]*self.mpidim
         self.mpicoord, self.cartesian = self.create_cartesian()
-        self.mpitypes = {'float32': MPI.FLOAT, 'complex64': MPI.COMPLEX}
+        self.mpitypes = {'float32': MPI.FLOAT, 'complex64': MPI.COMPLEX,
+                         'float64': MPI.DOUBLE, 'complex128': MPI.DOUBLE_COMPLEX}
         self.cartesian.barrier()
 
     def rng(self, seed=0):
@@ -73,18 +80,18 @@ class CartesianComm():
             self.cartesian, int(mu), displacement))
         return left, right
 
-    def forwardshift(self, mu, snd_buf=np.array([1], dtype='float32'), dtype='float32'):
+    def forwardshift(self, mu, snd_buf):
         # Returns the buffer held by the +mu neighbour (send to -mu, receive from +mu),
         # i.e. the data at x + mu.
         # Receive into a separate buffer: send and receive buffers must not overlap in MPI.
-        # The datatype is inferred from the arrays (`dtype` is kept only for compatibility).
+        # The datatype is that of snd_buf (single or double precision, real or complex): nothing is converted.
         rec_buf = snd_buf.copy()
         l, r = self.find_nn_mpi(mu)
         self.cartesian.Sendrecv(sendbuf=snd_buf, dest=l, sendtag=0,
                                 recvbuf=rec_buf, source=r, recvtag=0)
         return rec_buf
 
-    def backwardshift(self, mu, snd_buf=np.array([1], dtype='float32'), dtype='float32'):
+    def backwardshift(self, mu, snd_buf):
         # Returns the buffer held by the -mu neighbour (send to +mu, receive from -mu),
         # i.e. the data at x - mu.
         rec_buf = snd_buf.copy()
@@ -113,4 +120,4 @@ if __name__ == '__main__':
     print(CC.mpicoord)
     print(CC.forwardshift(mu=1, snd_buf=np.array(
         [[2, 2], [1, 1]], dtype='float')))
-    CC.backwardshift(mu=1)
+    CC.backwardshift(mu=1, snd_buf=np.array([[2, 2], [1, 1]], dtype='float'))
