@@ -46,7 +46,6 @@ import numpy as np
 from pylattice.core import montecarlo
 from pylattice.core.cli import Logger, Parser
 from pylattice.core.driver import run_simulation
-from pylattice.core.grid import LatticeComplexMatrix
 from pylattice.core.groups import su, su2 as group
 from pylattice.core.parallel import CartesianComm
 from pylattice.theories.gauge.field import gauge_field, load_links
@@ -93,8 +92,8 @@ class SUNModel:
         return self.field.cartesiancomm.comm
 
     def proposal(self, link, rng):
-        """X U for every link of the lattice `link` (a LatticeComplexMatrix), X at a distance eps from the identity"""
-        X = LatticeComplexMatrix(grid=link.grid, cartesiancomm=link.cartesiancomm, N=self.N)
+        """X U for every link of the lattice `link` (a lattice of matrices), X at a distance eps from the identity"""
+        X = link.copy()                                    # a lattice of matrices of the type of the links
         X.value = self.field.near_identity(self.eps, rng, size=self.sites)
         return X * link
 
@@ -118,16 +117,27 @@ class SUNModel:
         self.field.poke_index(mu, link)
         return accepted
 
+    def heatbath_links(self, links, staple, rng):
+        """the links (an array (sites, N, N)) after the heat bath with their staples: the group-specific step of the update (the
+        theory of another group overrides this and overrelaxed_links)"""
+        if self.N == 2:
+            return group.heatbath_link(staple, self.beta, rng)                # independent of the old link
+        return su.cabibbo_marinari_link(links, staple, self.beta / self.N, rng)
+
+    def overrelaxed_links(self, links, staple):
+        """the links after the overrelaxation with their staples. For N = 2, U -> W^+ U^+ W^+ with S = k W, its own inverse"""
+        if self.N == 2:
+            _, W = group.su2_decompose(staple)
+            Wdag = np.conj(np.swapaxes(W, -1, -2))
+            return Wdag @ np.conj(np.swapaxes(links, -1, -2)) @ Wdag
+        return su.cabibbo_marinari_overrelax_link(links, staple)
+
     def heatbath_update(self, mu, parity, rng):
         """The heat bath update of the links of direction mu on the sites of `parity`: the exact heat bath for N = 2, the
         Cabibbo-Marinari one (all the SU(2) subgroups in turn) otherwise; each link keeps the weight exp((beta/N) Re tr(U S)).
         Returns the number updated on this rank"""
         link = self.field.peek_index(mu)
-        staple = self.field.Staple(mu).value
-        if self.N == 2:
-            new = group.heatbath_link(staple, self.beta, rng)                # independent of the old link
-        else:
-            new = su.cabibbo_marinari_link(link.value, staple, self.beta / self.N, rng)
+        new = self.heatbath_links(link.value, self.field.Staple(mu).value, rng)
         link.value = np.where(parity[:, None, None], new, link.value)
         self.field.poke_index(mu, link)
         return int(parity.sum())
@@ -136,13 +146,7 @@ class SUNModel:
         """The overrelaxation of the links of direction mu on the sites of `parity`, in each SU(2) subgroup in turn: Re tr(U S)
         does not change, so neither does the action. For N = 2, U -> W^+ U^+ W^+ with S = k W, which is its own inverse"""
         link = self.field.peek_index(mu)
-        staple = self.field.Staple(mu).value
-        if self.N == 2:
-            _, W = group.su2_decompose(staple)
-            Wdag = np.conj(np.swapaxes(W, -1, -2))
-            new = Wdag @ np.conj(np.swapaxes(link.value, -1, -2)) @ Wdag
-        else:
-            new = su.cabibbo_marinari_overrelax_link(link.value, staple)
+        new = self.overrelaxed_links(link.value, self.field.Staple(mu).value)
         link.value = np.where(parity[:, None, None], new, link.value)
         self.field.poke_index(mu, link)
 
@@ -225,6 +229,9 @@ DEFAULT_BETA = {2: 2.3, 3: 5.7}            # near the deconfinement transition o
 
 
 class SUNParser(Parser):
+    prefix, label, default_beta = 'su', 'SU', DEFAULT_BETA          # the theory name of the files, the group name, the default beta of each N
+    beta_help = 'inverse coupling (default: 2.3 for SU(2), 5.7 for SU(3); required for N >= 4)'
+
     """The command line of the common options (see Parser), with a 4-dimensional lattice as default, the number of colors --nc
     (default 3) and --algorithm, --overrelax, --eps, --hits, --init. The default of --beta depends on N (DEFAULT_BETA: 2.3 for
     SU(2), 5.7 for SU(3)); for larger N it must be given."""
@@ -236,7 +243,7 @@ class SUNParser(Parser):
             if action.dest == 'beta':
                 action.help = 'inverse coupling (default: 2.3 for SU(2), 5.7 for SU(3); required for N >= 4)'
         parser.add_argument('--nc', type=_colors, default=3, metavar='N',
-                            help='the number of colors: the gauge group is SU(N)')
+                            help='the number of colors: the gauge group is {}(N)'.format(self.label))
         parser.add_argument('--algorithm', choices=('metropolis', 'heatbath'), default='heatbath',
                             help='the update of every sweep: the Cabibbo-Marinari heat bath (exact, always accepted; for '
                                  'SU(2) the exact heat bath), or Metropolis (its acceptance is measured)')
@@ -253,42 +260,42 @@ class SUNParser(Parser):
     def __init__(self, argv=None):
         super().__init__(argv)
         self.N = self.args['nc']
-        self.theory = 'su{}'.format(self.N)                 # the files are named su<N>_grid<grid>_mpi<mpigrid>_b<beta>...
+        self.theory = '{}{}'.format(self.prefix, self.N)    # the files are named su<N>_grid<grid>_mpi<mpigrid>_b<beta>...
         if self.beta is None:
-            if self.N not in DEFAULT_BETA:
-                self._argparser.error("--beta is required for SU({}): there is no default".format(self.N))
-            self.beta = self.args['beta'] = DEFAULT_BETA[self.N]
+            if self.N not in self.default_beta:
+                self._argparser.error("--beta is required for {}({}): there is no default".format(self.label, self.N))
+            self.beta = self.args['beta'] = self.default_beta[self.N]
         self.eps, self.hits, self.init = self.args['eps'], self.args['hits'], self.args['init']
         self.algorithm, self.overrelax = self.args['algorithm'], self.args['overrelax']
 
     def extra_info(self):
-        rows = [('gauge group', 'SU({})'.format(self.N)), ('algorithm', self.algorithm),
+        rows = [('gauge group', '{}({})'.format(self.label, self.N)), ('algorithm', self.algorithm),
                 ('overrelaxation sweeps', self.overrelax)]
         if self.algorithm == 'metropolis':
             rows += [('proposal eps', self.eps), ('hits per link', self.hits)]
         return rows + [('init', self.init)]
 
 
-def main(argv=None):
-    """Command line driver, e.g.
+def main(argv=None, parser_class=None, model_class=None, group_name='su'):
+    """Command line driver (parser_class, model_class and group_name: those of another gauge group, see pylattice.theories.gauge.son), e.g.
     mpiexec -np 4 python -m pylattice.theories.gauge.sun --nc=3 --grid=8x8x8x8 --mpigrid=2x2x1x1 --beta=5.7 --steps=500
     The run: the parser of the options, the logger with its banner, the field (cold, hot or loaded from a checkpoint), the
     model and run_simulation; the files are named su<N>_grid<grid>_mpi<mpigrid>_b<beta> followed by _meas.json, .log or _<sweep>.hdf5
     """
-    PP = SUNParser(argv)
+    PP = (parser_class or SUNParser)(argv)
     CC = CartesianComm(mpigrid=PP.mpigrid)
     LL = Logger(debug=PP.debug, logfile=PP.log_filename() is not None, filename=PP.log_filename() or 'run.log')
     LL.banner(PP, CC.comm)                        # logo, system and run information, in boxes
     rng = CC.rng(PP.seed)                         # an independent stream on every rank
 
-    field = gauge_field(PP.grid, CC, Nd=len(PP.grid), N=PP.N, rng=rng)
+    field = gauge_field(PP.grid, CC, Nd=len(PP.grid), N=PP.N, rng=rng, group=group_name)
     if PP.start_from:
         step = load_links(field, PP.start_from, log=LL.log.info, rng=rng)
         LL.log.info("restart: running {} new sweeps from the configuration saved at step {}; "
                     "the sweep counter starts afresh".format(PP.steps, step))
     elif PP.init == 'hot':
         field.random_config(rng)
-    model = SUNModel(field=field, logger=LL.log, beta=PP.beta, eps=PP.eps, hits=PP.hits, rng=rng,
+    model = (model_class or SUNModel)(field=field, logger=LL.log, beta=PP.beta, eps=PP.eps, hits=PP.hits, rng=rng,
                      algorithm=PP.algorithm, overrelax=PP.overrelax)
 
     run_simulation(model, PP, LL)                     # sweeps, measurement file, checkpoints, run log, summary

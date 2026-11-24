@@ -243,6 +243,10 @@ class LatticeReal(LatticeMPI):
     def average(self):
         return super().Average(value=self.value)
 
+    def re(self):
+        """the real part: a copy (the same interface as the complex lattices, so code can be written for both)"""
+        return self.copy()
+
     def __add__(self, rhs):
         out = self._new()
         if isinstance(rhs, LatticeReal):
@@ -385,6 +389,10 @@ class LatticeRealMatrix(LatticeMPI):
             grid=self.grid, cartesiancomm=self.cartesiancomm, N=self.N)
         out.value = np.swapaxes(self.value, -1, -2)
         return out
+
+    def adj(self):
+        """the adjoint: for real matrices the transpose"""
+        return self.transpose()
 
     def trace(self):
         out = LatticeReal(grid=self.grid, cartesiancomm=self.cartesiancomm)
@@ -757,6 +765,10 @@ class LatticeVectorRealMatrix(LatticeMPI):
             grid=self.grid, cartesiancomm=self.cartesiancomm, Nd=self.Nd, N=self.N)
         out.value = np.swapaxes(self.value, -1, -2)
         return out
+
+    def adj(self):
+        """the adjoint: for real matrices the transpose"""
+        return self.transpose()
 
     def trace(self):
         out = LatticeVectorReal(

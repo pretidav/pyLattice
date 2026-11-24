@@ -1,5 +1,5 @@
-"""The interface every group has (pylattice.core.groups.base and lie), tested on all of them at once: Z2, Z_q and
-SU(2). A theory written against this interface must work for each of them. No MPI.
+"""The interface every group has (pylattice.core.groups.base and lie), tested on all of them at once: Z2, Z_q,
+SU(2), SU(N) and SO(N). A theory written against this interface must work for each of them. No MPI.
 Run with:  pytest tests/core/test_group_interface.py
 """
 import numpy as np
@@ -9,10 +9,11 @@ from abc import ABC
 from pylattice.core.groups.base import Group
 from pylattice.core.groups.discrete import Z, Z2, DiscreteGroup
 from pylattice.core.groups.lie import LieGroup
+from pylattice.core.groups.so import SO
 from pylattice.core.groups.su import SU
 from pylattice.core.groups.su2 import SU2
 
-GROUPS = [Z2, Z(3), Z(7), SU2, SU(3), SU(4)]
+GROUPS = [Z2, Z(3), Z(7), SU2, SU(3), SU(4), SO(2), SO(3), SO(4)]
 ids = [repr(g) for g in GROUPS]
 
 
@@ -29,7 +30,7 @@ def test_the_classes_form_the_expected_hierarchy():
         Group()                                                                   # abstract
     with pytest.raises(TypeError):
         LieGroup()
-    assert [repr(g) for g in GROUPS] == ['Z2', 'Z3', 'Z7', 'SU(2)', 'SU(3)', 'SU(4)']
+    assert [repr(g) for g in GROUPS] == ['Z2', 'Z3', 'Z7', 'SU(2)', 'SU(3)', 'SU(4)', 'SO(2)', 'SO(3)', 'SO(4)']
 
 
 @pytest.mark.parametrize('g', GROUPS, ids=ids)

@@ -1,4 +1,4 @@
-"""SU(N) gauge field on 2 MPI ranks: the plaquette, the action, the staples, the Wilson loops, the Polyakov loop and the gauge
+"""SU(N) and SO(N) gauge fields on 2 MPI ranks: the plaquette, the action, the staples, the Wilson loops, the Polyakov loop and the gauge
 transformation of a lattice split over the ranks equal a serial numpy computation (np.roll) on the same global configuration, whichever
 direction the lattice is split in (the links across the rank boundaries come from the neighbour rank). Run with:
     mpiexec -n 2 python tests/theories/gauge/test_gauge_field_mpi.py
@@ -7,9 +7,9 @@ import numpy as np
 import pytest
 from mpi4py import MPI
 
-from pylattice.core.groups import su
+from pylattice.core.groups import so, su
 from pylattice.core.parallel import CartesianComm, pprint
-from pylattice.theories.gauge.field import SUNField
+from pylattice.theories.gauge.field import SONField, SUNField
 
 pytestmark = pytest.mark.skipif(MPI.COMM_WORLD.Get_size() != 2, reason='needs exactly 2 MPI ranks (mpiexec -n 2)')
 
@@ -47,11 +47,12 @@ def loops_and_polyakov(A, U, G, N):
     assert abs(A.Polyakov(t)) > 1e-5
 
 
-def check(mpigrid, local, N=2):
+def check(mpigrid, local, N=2, group='su'):
+    random, Field = (su.random_su, SUNField) if group == 'su' else (so.random_so, SONField)
     cc = CartesianComm(mpigrid=mpigrid)
     Nd, G = len(local), [m * l for m, l in zip(mpigrid, local)]
-    U = su.random_su(N, np.random.default_rng(42), size=tuple(G) + (Nd,))                              # the same on every rank
-    A = SUNField(grid=local, cartesiancomm=cc, Nd=Nd, N=N)
+    U = random(N, np.random.default_rng(42), size=tuple(G) + (Nd,))                              # the same on every rank
+    A = Field(grid=local, cartesiancomm=cc, Nd=Nd, N=N)
     A.value = local_block(U, cc, local).copy()
     shift = lambda X, mu: np.roll(X, -1, axis=mu)                                                      # value at x + mu
     link = lambda mu: U[..., mu, :, :]
@@ -69,14 +70,14 @@ def check(mpigrid, local, N=2):
                 for nu in range(Nd) if nu != mu)
         assert np.abs(A.Staple(mu).value - local_block(S, cc, local)).max() < 1e-12
     loops_and_polyakov(A, U, G, N)
-    g = su.random_su(N, np.random.default_rng(7), size=tuple(G))
+    g = random(N, np.random.default_rng(7), size=tuple(G))
     B = A.gauge_transform(local_block(g, cc, local))
     for mu in range(Nd):
         want = g @ link(mu) @ dag(shift(g, mu))
         assert np.abs(B.value[:, mu] - local_block(want, cc, local)).max() < 1e-12
     assert abs(B.Plaq() - A.Plaq()) < 1e-12 and abs(B.Action(2.3) - A.Action(2.3)) < 1e-9
     assert abs(B.Wilson(1, 2) - A.Wilson(1, 2)) < 1e-11 and abs(B.Polyakov(Nd - 1) - A.Polyakov(Nd - 1)) < 1e-11    # invariant
-    assert abs(A.Plaq().imag) < 1e-12 and type(B) is SUNField
+    assert abs(A.Plaq().imag) < 1e-12 and type(B) is Field
 
 
 def test_split_along_the_first_direction():
@@ -100,6 +101,13 @@ def test_su3_split_along_each_direction():
 
 def test_su4_split_along_one_direction():
     check([2, 1], [3, 4], N=4)
+
+
+def test_so_n_split_along_each_direction():
+    check([2, 1], [3, 4], N=2, group='so')
+    check([1, 2], [3, 4], N=3, group='so')
+    check([2, 1], [3, 4], N=4, group='so')
+    check([1, 1, 2], [2, 3, 3], N=3, group='so')                                        # the Polyakov loop runs across the ranks
 
 
 if __name__ == '__main__':

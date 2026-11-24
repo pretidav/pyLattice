@@ -17,3 +17,5 @@ tests/utils/__pycache__/*.pyc
 tests/core/__pycache__/*.pyc
 tests/theories/gauge/__pycache__/*.pyc
 tests/theories/spin/__pycache__/*.pyc
+docs/notes.toc
+docs/notes.out

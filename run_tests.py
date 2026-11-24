@@ -40,8 +40,9 @@ COLOR = {'PASS': 'green', 'FAIL': 'red', 'SKIP': 'yellow'}
 PYTEST_FILES = [
     'tests/core/test_tensors.py', 'tests/core/test_grid_vectorized.py', 'tests/core/test_cli.py',
     'tests/core/test_discrete.py', 'tests/core/test_su2.py', 'tests/core/test_su.py',
-    'tests/core/test_group_interface.py', 'tests/theories/gauge/test_gauge_field_su2.py',
-    'tests/theories/gauge/test_gauge_field_sun.py', 'tests/theories/gauge/test_gauge_sun.py',
+    'tests/core/test_so.py', 'tests/core/test_group_interface.py', 'tests/theories/gauge/test_gauge_field_su2.py',
+    'tests/theories/gauge/test_gauge_field_sun.py', 'tests/theories/gauge/test_gauge_field_son.py',
+    'tests/theories/gauge/test_gauge_sun.py', 'tests/theories/gauge/test_gauge_son.py',
     'tests/theories/gauge/test_gauge_sun_meas.py',
     'tests/core/test_rng.py', 'tests/core/test_stats.py', 'tests/core/test_montecarlo.py', 'tests/core/test_driver.py',
     'tests/core/test_callbacks.py', 'tests/theories/spin/test_ising.py',
@@ -54,6 +55,7 @@ SCRIPT_FILES = ['tests/core/test_grid.py', 'tests/core/test_grid_eo.py']
 MPI_FILES = {
     'tests/theories/gauge/test_gauge_field_mpi.py': ((2,), ()),   # its rank grids are written for exactly 2 ranks
     'tests/theories/gauge/test_gauge_sun.py': ((2,), (1, 4)),
+    'tests/theories/gauge/test_gauge_son.py': ((2,), (1, 4)),
     'tests/theories/gauge/test_gauge_sun_meas.py': ((2,), (1, 4)),
     'tests/core/test_grid_mpi.py': ((2,), ()),                  # its rank grids are written for exactly 2 ranks
     'tests/core/test_rng.py': ((2,), (1, 4)),
@@ -74,12 +76,12 @@ def all_files_of_the_routine():
 CHUNKS = ('core', 'gauge', 'spin')
 # the tests that every chunk runs: they check the repository itself (a test file nobody registered, the paths of the CI)
 EVERY_CHUNK = ('tests/utils/test_run_tests.py', 'tests/utils/test_ci_paths.py')
-_GROUP_TESTS = ('test_discrete.py', 'test_su2.py', 'test_su.py', 'test_group_interface.py')
+_GROUP_TESTS = ('test_discrete.py', 'test_su2.py', 'test_su.py', 'test_so.py', 'test_group_interface.py')
 
 
 def chunk_of(path):
     """The chunk of the CI that a test file belongs to, None for the tests every chunk runs (EVERY_CHUNK):
-        gauge   the groups (Z2, SU(2), SU(N)) and the gauge theories
+        gauge   the groups (Z2, SU(2), SU(N), SO(N)) and the gauge theories
         spin    the Ising model and the printing and plotting of measurements
         core    the rest: tensors, lattices, MPI, command line, random streams, statistics, Monte Carlo driver, HDF5
     Each CI workflow (.github/workflows/tests-<chunk>.yml) runs one chunk, and only when a file that the chunk covers changes."""

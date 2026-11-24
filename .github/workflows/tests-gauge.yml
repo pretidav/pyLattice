@@ -1,6 +1,6 @@
 name: Tests gauge
 
-# gauge (the groups Z2 / SU(2) / SU(N) and the SU(N) gauge theory)
+# gauge (the groups Z2 / SU(2) / SU(N) / SO(N) and the gauge theories)
 # Runs only when a file that these tests cover changes in the push: the source files they import, the tests and the
 # files that configure the run (tests/utils/test_ci_paths.py checks that this list is complete). The tests are chosen
 # in run_tests.py (chunk_of); run them locally with  python run_tests.py --chunk gauge
@@ -17,7 +17,9 @@ on:
       - 'pylattice/core/groups/__init__.py'
       - 'pylattice/core/groups/base.py'
       - 'pylattice/core/groups/discrete.py'
+      - 'pylattice/core/groups/gauge_observables.py'
       - 'pylattice/core/groups/lie.py'
+      - 'pylattice/core/groups/so.py'
       - 'pylattice/core/groups/su.py'
       - 'pylattice/core/groups/su2.py'
       - 'pylattice/core/hdf5io.py'
@@ -29,16 +31,21 @@ on:
       - 'pylattice/theories/__init__.py'
       - 'pylattice/theories/gauge/__init__.py'
       - 'pylattice/theories/gauge/field.py'
+      - 'pylattice/theories/gauge/son.py'
+      - 'pylattice/theories/gauge/son_meas.py'
       - 'pylattice/theories/gauge/sun.py'
       - 'pylattice/theories/gauge/sun_meas.py'
       # the tests
       - 'tests/core/test_discrete.py'
       - 'tests/core/test_group_interface.py'
+      - 'tests/core/test_so.py'
       - 'tests/core/test_su.py'
       - 'tests/core/test_su2.py'
       - 'tests/theories/gauge/test_gauge_field_mpi.py'
+      - 'tests/theories/gauge/test_gauge_field_son.py'
       - 'tests/theories/gauge/test_gauge_field_su2.py'
       - 'tests/theories/gauge/test_gauge_field_sun.py'
+      - 'tests/theories/gauge/test_gauge_son.py'
       - 'tests/theories/gauge/test_gauge_sun.py'
       - 'tests/theories/gauge/test_gauge_sun_meas.py'
       - 'tests/utils/test_ci_paths.py'

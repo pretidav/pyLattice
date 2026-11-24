@@ -1,4 +1,4 @@
-[![Tests core](https://github.com/pretidav/pyLattice/actions/workflows/tests-core.yml/badge.svg?branch=main)](https://github.com/pretidav/pyLattice/actions/workflows/tests-core.yml) [![Tests gauge](https://github.com/pretidav/pyLattice/actions/workflows/tests-gauge.yml/badge.svg?branch=main)](https://github.com/pretidav/pyLattice/actions/workflows/tests-gauge.yml) [![Tests spin](https://github.com/pretidav/pyLattice/actions/workflows/tests-spin.yml/badge.svg?branch=main)](https://github.com/pretidav/pyLattice/actions/workflows/tests-spin.yml)
+[![Tests core](https://github.com/pretidav/pyLattice/actions/workflows/tests-core.yml/badge.svg?branch=on)](https://github.com/pretidav/pyLattice/actions/workflows/tests-core.yml) [![Tests gauge](https://github.com/pretidav/pyLattice/actions/workflows/tests-gauge.yml/badge.svg?branch=on)](https://github.com/pretidav/pyLattice/actions/workflows/tests-gauge.yml) [![Tests spin](https://github.com/pretidav/pyLattice/actions/workflows/tests-spin.yml/badge.svg?branch=on)](https://github.com/pretidav/pyLattice/actions/workflows/tests-spin.yml)
 
 # pyLattice
 <p align="center">
@@ -9,9 +9,11 @@ A lattice (gauge) theory simulation library in Python, parallel with MPI. A latt
 a theory provides the Monte Carlo sweep, and the library provides the rest: checkpoints and exact restarts,
 logs, measurements written as the run goes, and offline analysis.
 
-Implemented: the Ising model (spin theories on sites, with values in the group Z2) and SU(2): the group (algebra,
-quaternionic representation of Creutz, link heat bath, SU(N) from SU(2) blocks) and a field of links; the gauge
-Monte Carlo itself (Wilson action, staples) is not written yet.
+**Documentation:** [docs/notes.pdf](docs/notes.pdf) (source: [docs/notes.tex](docs/notes.tex)) describes the design, the
+parallelization, the file formats, the algorithms and the tests.
+
+Implemented: the Ising model (spin theories on sites, with values in the group Z2) and the Wilson-action gauge theories
+SU(N) (SU(2) included) and SO(N), with heat bath, Metropolis and overrelaxation updates.
 
 **Contents:** [Installation](#installation) · [Quick start](#quick-start) · [Running a simulation](#running-a-simulation) ·
 [Working with the results](#working-with-the-results) · [Repository layout](#repository-layout) · [Tests](#tests) ·
@@ -90,6 +92,21 @@ Besides the common options (including `--thermalization` and `--measure-every`) 
 | `--eps`, `--hits` | `0.4`, `1` | Metropolis only: size of the proposal in (0, 1], chosen for an acceptance of 0.4 to 0.6, and proposals per link and visit |
 | `--init cold\|hot` | `cold` | the starting configuration (unless `--start-from`) |
 
+SO(N) gauge theories (real orthogonal links with determinant 1; SO(2) = U(1)) run the same way with
+`pylattice.theories.gauge.son`, with the same options (`--nc`, default 3) and the files named `so<N>_...`:
+
+~~~
+mpiexec -np 4 python -m pylattice.theories.gauge.son --nc=3 --beta=6.0 --grid=4x4x8x8 --mpigrid=2x2x1x1 --steps=500 \
+    --thermalization=100 --overrelax=4
+~~~
+
+The action is the same, S = beta sum (1 - (1/N) tr P) with beta = 2N/g^2 (the convention of the SO(N) literature), and the
+heat bath is the Cabibbo-Marinari one over the N(N-1)/2 rotation planes (SO(2) subgroups): in a plane the conditional weight
+of a link is a von Mises distribution, drawn exactly; overrelaxation reflects the angle of each plane. `--beta` is required
+except for SO(2) (default 1.0). The plaquette is real, so `plaq_im` is exactly 0. Offline measurements:
+`python -m pylattice.theories.gauge.son_meas`, as for SU(N). Note that SO(3) is the adjoint-representation SU(2) theory,
+whose 4-dimensional lattice has a bulk transition at weak coupling.
+
 During the run they measure only the cheap observables: `plaq_re` and `plaq_im` (the average plaquette (1/N) tr P; the
 imaginary part is zero up to rounding and checks the links), `action` per site, and the acceptance. The expensive ones are
 measured offline on the stored configurations (`--checkpoint-every`, files `su<N>_grid<grid>_mpi<mpigrid>_b<beta>_<sweep>.hdf5`), see
@@ -128,7 +145,7 @@ text.
 ### What a run writes
 
 Every file starts with the **run name**, `<theory>_grid<grid>_mpi<mpigrid>_b<beta>`, so that it says what it is and where it
-comes from: the theory (`ising`, `su2`, `su3`, ...), the lattice of each rank as given to `--grid`, the ranks as given to
+comes from: the theory (`ising`, `su2`, `su3`, `so3`, ...), the lattice of each rank as given to `--grid`, the ranks as given to
 `--mpigrid`, and the inverse coupling. For the run above it is `ising_grid20x20_mpi2x2_b1.5`:
 
 | file | when | content |
@@ -204,7 +221,7 @@ measurements of the run; `--out` chooses another name) in the same format (sweep
 with `m`, `abs_m`, `m2`, `e` and `e2` per site, in the order of the steps. With `--logfile` the log goes to `ising_grid20x20_mpi2x2_b1.5_meas_offline.log`. The rank layout may differ from the run's. Other theories
 plug in with their own `measure(path)` through `pylattice.core.measure.measure_files`.
 
-For SU(N) the expensive observables are measured this way:
+For SU(N) (and, with `pylattice.theories.gauge.son_meas`, for SO(N)) the expensive observables are measured this way:
 
 ~~~
 mpiexec -np 4 python -m pylattice.theories.gauge.sun_meas checkpoints/su3_grid4x4x8x8_mpi2x2x1x1_b5.7_*.hdf5 --beta=5.7 --mpigrid=2x2x1x1 --max-loop=3
@@ -237,18 +254,24 @@ pylattice/
                      su.py        SU(N): generators (Gell-Mann), f and d symbols, exp / log, Haar-random and
                                   near-identity elements, projection, and the SU(2) blocks of a
                                   Cabibbo-Marinari update
+                     so.py        SO(N): generators, exp / log, Haar-random elements, and the SO(2) rotation
+                                  planes of a Cabibbo-Marinari update (von Mises heat bath, overrelaxation)
+                     gauge_observables.py  plaquettes, staples, loops, action and gauge transformation of a
+                                  field of links, for any gauge group
   theories/
     spin/          variables on sites: Ising (simulation and offline measurements)
-    gauge/         variables on links: SU(N) gauge theory
-                     field.py     SUNField (and its SU(2) case SU2Field): the links, plaquettes, staples, Wilson and
-                                  Polyakov loops, action, gauge transformations
+    gauge/         variables on links: SU(N) and SO(N) gauge theories
+                     field.py     SUNField (and its SU(2) case SU2Field), SONField: the links of each group, with the
+                                  observables of gauge_observables
                      sun.py       the Wilson-action theory (any N, SU(2) included): Cabibbo-Marinari heat bath,
                                   Metropolis and overrelaxation sweeps, and the command line
                      sun_meas.py  the loops and Creutz ratios, measured on stored configurations
+                     son.py       the same for SO(N) (the sweeps with the rotation-plane steps)
+                     son_meas.py  offline measurements of SO(N) configurations
   utils/           plot_meas: print and plot a measurements file
 tests/             mirrors the package (tests/core, tests/theories, tests/utils)
 benchmarks/        performance evaluation, parallel HDF5 demo
-docs/              notes
+docs/              notes.tex / notes.pdf: the documentation
 ~~~
 
 A theory is a class with `sweep(rng) -> (accepted, attempted)` and `observables() -> dict`; the driver
@@ -286,7 +309,7 @@ The tests are split into three chunks, each with its own GitHub workflow and bad
 | chunk | tests |
 |---|---|
 | `core` | tensors, lattices and shifts, MPI, command line, random streams, statistics, Monte Carlo driver, checkpoints |
-| `gauge` | the groups (Z2, SU(2), SU(N)) and the SU(N) gauge theory: field, sweeps, offline measurements |
+| `gauge` | the groups (Z2, SU(2), SU(N), SO(N)) and the SU(N) and SO(N) gauge theories: fields, sweeps, offline measurements |
 | `spin` | the Ising model, its offline measurements, printing and plotting of measurements |
 
 A push runs a chunk only if a file that the chunk covers changed: the source files its tests import, the tests, and the

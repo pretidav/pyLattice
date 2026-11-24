@@ -8,7 +8,7 @@ number, (2, 2) for an SU(2) matrix), and an array of elements has shape size + s
 take a numpy Generator (pylattice.core.rng); None gives a fresh unseeded one.
 
 Implementations: pylattice.core.groups.discrete (Z2, Z_q), pylattice.core.groups.su2 (SU2),
-pylattice.core.groups.su (SU(N)).
+pylattice.core.groups.su (SU(N)), pylattice.core.groups.so (SO(N)).
 """
 from abc import ABC, abstractmethod
 

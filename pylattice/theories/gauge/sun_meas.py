@@ -68,18 +68,20 @@ def loop_observables(field, max_loop=2):
     return out
 
 
-def measure_su(path, cartesiancomm, grid, beta, N, max_loop=2, log=None):
-    """loads the configuration in path (checking it is an SU(N) one for this lattice) and measures it: the plaquette
-    observables of the run and the loop observables"""
-    field = gauge_field(grid, cartesiancomm, Nd=len(grid), N=N)
+def measure_su(path, cartesiancomm, grid, beta, N, max_loop=2, log=None, group='su'):
+    """loads the configuration in path (checking it is an SU(N) one for this lattice; group='so': an SO(N) one) and measures it:
+    the plaquette observables of the run and the loop observables"""
+    field = gauge_field(grid, cartesiancomm, Nd=len(grid), N=N, group=group)
     load_links(field, path, log=log, label='check')
     return {**plaquette_observables(field, beta), **loop_observables(field, max_loop)}
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description='Measure SU(N) gauge configurations stored in HDF5 files.',
-                                     epilog='example: mpiexec -np 4 python -m pylattice.theories.gauge.sun_meas '
-                                            'checkpoints/su3_grid4x4x8x8_mpi2x2x1x1_b5.7_*.hdf5 --beta=5.7 --mpigrid=2x2x1x1')
+def main(argv=None, group='su', module='sun_meas'):
+    """the command line; group 'so' and module 'son_meas' make the one of the SO(N) configurations (see pylattice.theories.gauge.son_meas)"""
+    label = group.upper()
+    parser = argparse.ArgumentParser(description='Measure {} gauge configurations stored in HDF5 files.'.format(label + '(N)'),
+                                     epilog='example: mpiexec -np 4 python -m pylattice.theories.gauge.{} '
+                                            'checkpoints/{}3_grid4x4x8x8_mpi2x2x1x1_b5.7_*.hdf5 --beta=5.7 --mpigrid=2x2x1x1'.format(module, group))
     parser.add_argument('files', nargs='+', metavar='FILE.hdf5', help='configurations (checkpoints) to measure')
     parser.add_argument('--beta', type=float, required=True,
                         help='the coupling of the run that made the files (for the action)')
@@ -117,10 +119,10 @@ def main(argv=None):
                 min(9, min(total)), 'x'.join(map(str, total))))
         grid = [t // m for t, m in zip(total, mpigrid)]
         cartesiancomm = CartesianComm(mpigrid=mpigrid)
-        log.info("SU({}) lattice {} on {} ranks ({}), local grid {}; beta {}; loops up to {}x{}; {} files; output {}".format(
-            N, 'x'.join(map(str, total)), comm.Get_size(), 'x'.join(map(str, mpigrid)), 'x'.join(map(str, grid)),
+        log.info("{}({}) lattice {} on {} ranks ({}), local grid {}; beta {}; loops up to {}x{}; {} files; output {}".format(
+            label, N, 'x'.join(map(str, total)), comm.Get_size(), 'x'.join(map(str, mpigrid)), 'x'.join(map(str, grid)),
             args.beta, args.max_loop, args.max_loop, len(args.files), out))
-        measure_files(args.files, lambda path: measure_su(path, cartesiancomm, grid, args.beta, N, args.max_loop, log.info),
+        measure_files(args.files, lambda path: measure_su(path, cartesiancomm, grid, args.beta, N, args.max_loop, log.info, group),
                       comm, filename=out, log=log.info)
     except (ValueError, OSError, KeyError) as error:
         log.error(str(error))

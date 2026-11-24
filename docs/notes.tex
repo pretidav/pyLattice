@@ -1,97 +1,339 @@
-\documentclass{article}
+\documentclass[11pt]{article}
 
-% Language setting
-% Replace `english' with e.g. `spanish' to change the document language
 \usepackage[english]{babel}
+\usepackage[a4paper,top=2.2cm,bottom=2.2cm,left=2.6cm,right=2.6cm]{geometry}
 
-% Set page size and margins
-% Replace `letterpaper' with`a4paper' for UK/EU standard size
-\usepackage[letterpaper,top=2cm,bottom=2cm,left=3cm,right=3cm,marginparwidth=1.75cm]{geometry}
-
-% Useful packages
-\usepackage{amsmath}
+\usepackage{amsmath,amssymb}
 \usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
 \usepackage[colorlinks=true, allcolors=blue]{hyperref}
 \usepackage{tikz}
-\usetikzlibrary{arrows,matrix,positioning}
+\usetikzlibrary{arrows,matrix,positioning,fit,calc}
 
-\title{PyLattice Notes}
-\author{David Preti \\ \href{mailto:preti.david@gmail.com}{preti.david@gmail.com}}
+\sloppy
+\setlength{\emergencystretch}{3em}
+\setlist{itemsep=2pt,topsep=4pt}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{black!30},
+  backgroundcolor=\color{black!3},
+  keywordstyle=\color{blue!60!black},
+  commentstyle=\color{green!40!black},
+  stringstyle=\color{red!50!black},
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  xleftmargin=1em,xrightmargin=1em
+}
+\lstdefinestyle{shell}{language=bash,morekeywords={mpiexec,python,pytest}}
+
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\tr}{\operatorname{tr}}
+\newcommand{\Tr}{\operatorname{Tr}}
+\renewcommand{\Re}{\operatorname{Re}}
+\newcommand{\Real}{\mathbb{R}}
+\newcommand{\Cplx}{\mathbb{C}}
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\ee}{\mathrm{e}}
+\newcommand{\ii}{\mathrm{i}}
+
+\title{\texttt{PyLattice}\\[2pt]\large Documentation of the code}
+\author{David Preti \\ \href{mailto:preti.david@gmail.com}{preti.david@gmail.com}\\[1.2em]
+        \includegraphics[width=3.4cm]{mylogo.png}}
+\date{}
 
 \begin{document}
 \maketitle
 
+\begin{abstract}
+\noindent
+\textsc{PyLattice} is a \texttt{python} library for Monte Carlo simulations of lattice field theories, parallelized with MPI.
+A lattice is split over the MPI ranks; a \emph{theory} provides the Monte Carlo sweep, written with the operations of the lattice
+classes (shifts, products, traces, reductions); the library provides everything around it: the tensor algebra, the domain
+decomposition and the halo exchange, parallel HDF5 checkpoints with exact restarts, logging, measurements written as the run goes,
+offline measurements on stored configurations, and the statistical analysis. The implemented theories are the Ising model and the
+Wilson-action gauge theories with gauge group $SU(N)$ (SU(2) included) and $SO(N)$. These notes document the design, the
+conventions and the algorithms of the code.
+\end{abstract}
 
+\tableofcontents
+\bigskip
+
+% ====================================================================================================
 \section{Introduction}
-This \texttt{python} package is intended for Lattice theories research. 
+\label{sec:intro}
 
-\section{Linear Algebra}
-\subsection{Scalar}
-\subsubsection*{\texttt{Real}}
-\subsubsection*{\texttt{Complex}}
+\subsection{Purpose and design}
+The code is meant for research on lattice theories. Its guiding idea is a strict separation of concerns:
+\begin{itemize}
+  \item \textbf{All the parallelization complexity sits in the tensor and lattice classes} (\code{pylattice.core.tensors},
+        \code{pylattice.core.grid}, \code{pylattice.core.parallel}). A lattice object knows how it is split over the MPI ranks;
+        moving it by one site along a direction, or summing a quantity over all the sites, are single calls that do the halo
+        exchange and the reduction.
+  \item \textbf{Physics is written on top of that, in terms of lattice operations.} A plaquette is a product of four shifted
+        link fields; the Wilson action is a trace and a reduction. No physical observable, action or update contains an
+        MPI call, a loop over sites or an index into a halo, so it reads like the formula and is the same on one rank or on a
+        hundred.
+  \item \textbf{The Monte Carlo machinery is independent of the theory.} A theory is a class with two methods,
+        \code{sweep(rng)} and \code{observables()}. The driver does thermalization, measurement schedule, checkpoints, logging and
+        the files; the same driver runs every theory.
+  \item \textbf{Everything is reproducible.} All the randomness of a sweep comes from a numpy \code{Generator} that the driver
+        passes in; every rank has an independent stream, and a checkpoint stores the state of every stream, so a restarted run
+        continues \emph{bit for bit} as if it had never stopped.
+\end{itemize}
 
-\subsection{Vectors}
-\subsubsection*{\texttt{VectorReal}}
-\subsubsection*{\texttt{VectorComplex}}
+\subsection{Features}
+\begin{itemize}
+  \item Tensor algebra with batch broadcasting (\S\ref{sec:tensors}) and lattice fields of scalars, vectors, matrices and vectors
+        of matrices, real or complex, in double precision (\S\ref{sec:lattice}).
+  \item Cartesian domain decomposition over MPI in any number of dimensions, periodic boundary conditions, halo exchange for shifts,
+        global reductions, even/odd (checkerboard) sublattices (\S\ref{sec:parallel}).
+  \item Parallel HDF5 input/output; the file is independent of the layout of the ranks, so a configuration written on $4$ ranks
+        can be read on $2$ (\S\ref{sec:io}).
+  \item A Monte Carlo driver with thermalization, measurement every $n$ sweeps, callbacks, a command line, boxed coloured logs and
+        a one-line-per-step run log (\S\ref{sec:mc}).
+  \item Offline measurements on stored configurations, and printing/plotting of measurement files with mean, error and
+        autocorrelation times (\S\ref{sec:offline}, \S\ref{sec:stats}).
+  \item Groups behind one interface: $\mathbb{Z}_2$, $\mathbb{Z}_q$, $SU(2)$ (quaternions), $SU(N)$ (generalized Gell-Mann
+        generators), $SO(N)$ (\S\ref{sec:groups}).
+  \item Gauge fields with staples, plaquettes, Wilson and Polyakov loops, Creutz ratios, Wilson action and gauge transformations
+        for any gauge group (\S\ref{sec:gauge}).
+  \item Theories (\S\ref{sec:theories}): the Ising model with Metropolis; $SU(N)$ and $SO(N)$ gauge theories with the
+        Cabibbo--Marinari heat bath, Metropolis and overrelaxation updates.
+  \item Tests, including MPI tests on several rank layouts, and continuous integration split into path-filtered chunks
+        (\S\ref{sec:tests}).
+\end{itemize}
 
-\subsection{Matrix}
-\subsubsection*{\texttt{RealMatrix}}
-\subsubsection*{\texttt{ComplexMatrix}}
-\subsubsection*{\texttt{Identity}}
+\subsection{Requirements and installation}
+\code{python} 3.11, \code{numpy}, \code{scipy}, \code{matplotlib}, \code{mpi4py} with an MPI implementation (OpenMPI), \code{rich} and
+\code{psutil}. Reading and writing configurations needs \code{h5py} \emph{built with parallel HDF5} (the \code{mpio} driver); the PyPI
+wheels do not have it, so on macOS and Linux the recommended route is \code{conda-forge}:
+\begin{lstlisting}[style=shell]
+conda create -n pylattice -c conda-forge --override-channels python=3.11 numpy scipy matplotlib psutil rich pytest \
+      openmpi mpi4py 'h5py=*=mpi_openmpi*'
+conda activate pylattice
+\end{lstlisting}
+Without parallel \code{h5py} everything runs except the checkpoints, the restarts and the offline measurements.
 
-\subsection{Matrix Vector}
-\subsubsection*{\texttt{VectorRealMatrix}}
-\subsubsection*{\texttt{VectorComplexMatrix}}
+\subsection{Quick start}
+\begin{lstlisting}[style=shell]
+# Ising model, 2x2 ranks, each with a 20x20 piece: a 40x40 lattice
+mpiexec -np 4 python -m pylattice.theories.spin.ising --grid=20x20 --mpigrid=2x2 --beta=0.44 --steps=2000 \
+        --thermalization=200 --checkpoint-every=500
 
-\section{Lattice Objects}
+# SU(3) gauge theory, Cabibbo-Marinari heat bath followed by 4 overrelaxation sweeps
+mpiexec -np 4 python -m pylattice.theories.gauge.sun --nc=3 --grid=4x4x8x8 --mpigrid=2x2x1x1 --beta=5.7 \
+        --steps=500 --thermalization=100 --overrelax=4 --checkpoint-every=50
 
-\subsection{Lattice Scalar}
-\subsubsection*{\texttt{LatticeReal}}
-\subsubsection*{\texttt{LatticeComplex}}
+# SO(3) gauge theory
+mpiexec -np 4 python -m pylattice.theories.gauge.son --nc=3 --grid=4x4x8x8 --mpigrid=2x2x1x1 --beta=6.0 --steps=500
 
-\subsection{Lattice Matrix}
-\subsubsection*{\texttt{LatticeRealMatrix}}
-\subsubsection*{\texttt{LatticeComplexMatrix}}
+# look at the results (no MPI needed)
+python -m pylattice.utils.plot_meas ising_grid20x20_mpi2x2_b0.44_meas.json --skip 200
+\end{lstlisting}
 
-\subsection{Lattice Vector}
-\subsubsection*{\texttt{LatticeVectorReal}}
-\subsubsection*{\texttt{LatticeVectorComplex}}
+% ====================================================================================================
+\section{Repository layout}
+\label{sec:layout}
 
-\subsection{Lattice Vector Matrix}
-\subsubsection*{\texttt{LatticeVectorRealMatrix}}
-\subsubsection*{\texttt{LatticeVectorComplexMatrix}}
+\begin{lstlisting}[basicstyle=\ttfamily\footnotesize]
+pylattice/
+  core/                 tensors, lattice fields on an MPI grid, parallel HDF5 I/O, command line,
+    tensors.py            random streams, statistics, Monte Carlo driver, callbacks, offline measurements
+    grid.py               LatticeBase, LatticeMPI and the lattice classes (real/complex, scalar/vector/matrix)
+    parallel.py           CartesianComm: Cartesian communicator, halo exchange, reductions
+    rng.py                independent random streams, one per rank
+    hdf5io.py             Writer / Reader / describe / load_into / restore_rng (parallel HDF5)
+    montecarlo.py         the driver run(), History, metropolis_accept
+    callbacks.py          Checkpointer, RunLog, MeasurementFile
+    driver.py             run_simulation: the run of a theory from the command line
+    cli.py                Parser, Logger (boxes, logo, system information), file naming
+    measure.py            measure_files: offline measurements of stored configurations
+    stats.py              batch-means error, Gamma-method autocorrelation analysis
+    groups/               the groups behind one interface (base.py: identity, product, inverse, ...)
+      discrete.py           Z2, Z_q and their exact heat bath
+      lie.py                interface of Lie groups: algebra, exp, log, near-identity
+      su2.py                SU(2): quaternions (Creutz), heat bath of a link
+      su.py                 SU(N): Gell-Mann generators, exp/log, Haar, SU(2) blocks (Cabibbo-Marinari)
+      so.py                 SO(N): generators, exp/log, Haar, SO(2) planes, von Mises heat bath
+      gauge_observables.py  staples, plaquettes, loops, action, gauge transformation: any gauge group
+  theories/
+    spin/                 variables on sites
+      ising.py              the Ising model: field, model, command line
+      ising_meas.py         offline measurements of Ising configurations
+    gauge/                variables on links
+      field.py              SUNField, SU2Field, SONField, gauge_field(), load_links()
+      sun.py, son.py        SU(N) / SO(N) theory: sweeps and command line
+      sun_meas.py, son_meas.py   offline measurements (loops, Polyakov, Creutz ratios)
+  utils/plot_meas.py    print and plot a measurements file
+tests/                  mirrors the package (core, theories, utils)
+benchmarks/             performance evaluation, parallel HDF5 demo
+docs/                   these notes
+run_tests.py            the test routine: lists every test, runs them on 1/2/4 ranks, chunks for the CI
+.github/workflows/      tests-core.yml, tests-gauge.yml, tests-spin.yml
+\end{lstlisting}
 
+% ====================================================================================================
+\section{Linear algebra: tensors}
+\label{sec:tensors}
+
+The module \code{pylattice.core.tensors} provides the small algebra on which the lattice classes are built. Every class wraps a
+numpy array \code{value} whose \emph{last} axes hold the structure; any leading axes are a batch, and every operation broadcasts
+over them. This is what lets a lattice class apply an operation to all the sites at once.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lll}
+\toprule
+class & \code{value} shape & meaning \\
+\midrule
+\code{Real}, \code{Complex}                   & $(1,)$      & scalar \\
+\code{VectorReal}, \code{VectorComplex}       & $(N_d,)$    & vector \\
+\code{RealMatrix}, \code{ComplexMatrix}       & $(N,N)$     & matrix \\
+\code{VectorRealMatrix}, \code{VectorComplexMatrix} & $(N_d,N,N)$ & vector of matrices \\
+\code{Identity}                               & $(N,N)$     & identity matrix (a \code{RealMatrix}) \\
+\bottomrule
+\end{tabular}
+\caption{The tensor classes.}
+\end{table}
+
+\code{Complex} is a subclass of \code{Real}, and \code{ComplexMatrix} of \code{RealMatrix}. The result of a binary operation is
+complex if and only if one of the operands is; combinations that make no sense raise \code{TypeError}. With $S$ a scalar (a
+\code{Real}/\code{Complex} or a python number), $V$ a vector, $M$ a matrix and $T$ a vector of matrices:
+\begin{center}
+\begin{tabular}{lp{0.78\textwidth}}
+\toprule
+operator & operands \\
+\midrule
+\code{+}, \code{-} & $S\pm S$, $V\pm V$, $M\pm M$, $T\pm T$, $M\pm T$, $T\pm M$, and $S\pm X$ (added to every entry) \\
+\code{*}  & $S\cdot X$, $X\cdot S$ (scaling); $V\cdot V$ (entrywise); $M\cdot M$ (matrix product); $M\cdot V$ ($M v$);
+            $V\cdot M$ ($v^{T}M$); $T\cdot T$, $T\cdot M$, $M\cdot T$ (product for every index) \\
+\code{/}  & $X/S$ \\
+\code{**} & $S^{S}$; $M^{n}$, $T^{n}$ (matrix power, negative: inverse) \\
+\bottomrule
+\end{tabular}
+\end{center}
+The group modules use the tensor classes for the algebra objects (a generator is a \code{ComplexMatrix}, an algebra vector a
+\code{VectorReal}), while the lattice code works directly on numpy arrays with the same layout.
+
+% ====================================================================================================
+\section{Lattice objects}
+\label{sec:lattice}
+
+\subsection{Classes}
+A lattice object holds a tensor on every site of the (local piece of the) lattice. All the data of a lattice is a single array
+\code{value} of shape (sites$,\;$tensor shape), double precision (\code{REAL}$=$float64, \code{COMPLEX}$=$complex128 in
+\code{grid.py}); the Ising spins are the exception, stored as \code{int8}.
+
+\begin{center}
+\small
+\begin{tabular}{p{5.3cm}p{3.3cm}p{4.6cm}}
+\toprule
+class & \code{value} shape & use \\
+\midrule
+\code{LatticeReal}, \code{LatticeComplex}               & (sites,)          & scalar fields, spins, traces \\
+\code{LatticeRealMatrix}, \code{LatticeComplexMatrix}   & (sites,$N$,$N$)   & products of links, plaquettes, staples \\
+\code{LatticeVectorReal}, \code{LatticeVectorComplex}   & (sites,$N_d$)     & vector fields \\
+\code{LatticeVectorRealMatrix}, \code{LatticeVectorComplexMatrix} & (sites,$N_d$,$N$,$N$) & gauge fields: one matrix per link \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The hierarchy is \code{LatticeBase} $\to$ \code{LatticeMPI} $\to$ concrete classes. \code{LatticeBase} knows the \emph{local}
+geometry: the local grid, the flat and tensor index of every site, the even/odd decomposition. \code{LatticeMPI} adds the
+communicator and everything that crosses a rank boundary: \code{moveforward}, \code{movebackward}, the non-mutating
+\code{shift_forward}/\code{shift_backward}, \code{copy}, and the reductions \code{ReduceSum}/\code{Average}.
+
+\subsection{Site indexing}
+The local grid has $L_0\times\dots\times L_{D-1}$ sites; a site $\mathbf{x}=(x_0,\dots,x_{D-1})$ is stored at the flat index of the
+row-major (C) order, so the \emph{last} direction varies fastest:
+\begin{equation}
+  \operatorname{idx}(\mathbf{x}) \;=\; x_{D-1}+L_{D-1}\Big(x_{D-2}+L_{D-2}\big(\cdots+L_1\,x_0\big)\Big).
+\end{equation}
+For physics the last direction is the time (the Polyakov loop and the temporal plaquettes use it), so a lattice
+\code{--grid=4x4x8x8} has the long directions last.
+
+\subsection{Operations}
+Arithmetic follows the tensor classes, site by site and vectorized over all the sites: \code{+}, \code{-}, \code{*} (matrix product
+for matrix lattices), \code{adj()} (hermitian conjugate; for real matrices the transpose), \code{transpose()}, \code{conj()},
+\code{trace()}, \code{det()}, \code{inv()}, \code{re()}, \code{im()}. A vector-of-matrices lattice gives the field in one direction as
+a matrix lattice with \code{peek_index(mu)} and stores it back with \code{poke_index(mu, lattice)}.
+
+Moving a lattice is the one operation that needs communication:
+\begin{description}
+  \item[\code{shift_forward(mu)}] returns a new lattice whose value at $\mathbf{x}$ is the value at $\mathbf{x}+\hat\mu$ of the old one
+        (periodic over the whole lattice, across the rank boundaries).
+  \item[\code{shift_backward(mu)}] the value at $\mathbf{x}-\hat\mu$.
+\end{description}
+(\code{moveforward}/\code{movebackward} are the same operations in place.) Physics is written with these two. For instance the
+link product of a plaquette (\S\ref{sec:gauge}) is
+\begin{lstlisting}[language=Python]
+Umu, Unu = self.peek_index(mu), self.peek_index(nu)
+P = Umu * Unu.shift_forward(mu) * Umu.shift_forward(nu).adj() * Unu.adj()
+\end{lstlisting}
+and a global quantity is a reduction: \code{lattice.reducesum()} sums over the sites of \emph{all} the ranks and returns the same
+number on every rank; \code{average()} divides by the global number of sites.
+
+\subsection{Even/odd sublattices}
+\code{get_EO_idx()} returns the boolean masks of the even and odd sites (the parity of the sum of the coordinates; the origin is
+even). \code{peek_EO_lattices()} and \code{poke_EO_lattices()} extract and put back the two half-lattices. Updates that need
+independent sites (a spin interacts only with its neighbours, a link only with the links of its plaquettes) are done one parity
+at a time (\S\ref{sec:theories}). The parity is computed from the \emph{local} coordinates, which is the global parity only if every
+local extent is even, since each rank then starts at an even global coordinate; \code{get_EO_idx} therefore raises an error for an
+odd local extent, and every theory that uses a checkerboard requires even local grids.
+
+% ====================================================================================================
 \section{Parallelization}
+\label{sec:parallel}
 
+\subsection{Domain decomposition}
+The global lattice $\prod_d G_d$ is split into a Cartesian grid of $\prod_d m_d$ blocks, one per MPI rank. On the command line the
+user gives the \emph{local} grid and the rank grid:
+\[
+  \begin{gathered}
+  \texttt{--grid}=(L_0,\dots,L_{D-1}),\qquad \texttt{--mpigrid}=(m_0,\dots,m_{D-1}),\\
+  G_d = m_d L_d,\qquad \text{ranks}=\textstyle\prod_d m_d .
+  \end{gathered}
+\]
+\code{CartesianComm(mpigrid)} creates an MPI Cartesian communicator with periodic boundaries; \code{mpicoord} is the coordinate
+$\mathbf{c}$ of the rank in the rank grid, and the rank owns the sites $X_d = c_d L_d + x_d$, $0\le x_d<L_d$. The weak-scaling
+interpretation is direct: with the same \code{--grid}, doubling the ranks doubles the volume.
 
+\subsection{Halo exchange}
 \begin{figure}[t]
     \centering
         \begin{tikzpicture}
             \matrix [matrix of math nodes] (m)
                 {
-                    i_{1,1} & i_{1,2} & i_{1,3}  & i_{1,4} & i_{1,5} & i_{1,6} \\ 
-                    i_{2,1} & i_{2,2} & i_{2,3} & i_{2,4} & i_{2,5} & i_{2,6} \\ 
-                    i_{3,1} & i_{3,2} & i_{3,3} & i_{3,4} & i_{3,5} & i_{3,6} \\ 
-                    i_{4,1} & i_{4,2} & i_{4,3} & i_{4,4} & i_{4,5} & i_{4,6} \\ 
-                    i_{5,1} & i_{5,2} & i_{5,3} & i_{5,4} & i_{5,5} & i_{5,6} \\ 
-                    i_{6,1} & i_{6,2} & i_{6,3} & i_{6,4} & i_{6,5} & i_{6,6} \\ 
+                    i_{1,1} & i_{1,2} & i_{1,3}  & i_{1,4} & i_{1,5} & i_{1,6} \\
+                    i_{2,1} & i_{2,2} & i_{2,3} & i_{2,4} & i_{2,5} & i_{2,6} \\
+                    i_{3,1} & i_{3,2} & i_{3,3} & i_{3,4} & i_{3,5} & i_{3,6} \\
+                    i_{4,1} & i_{4,2} & i_{4,3} & i_{4,4} & i_{4,5} & i_{4,6} \\
+                    i_{5,1} & i_{5,2} & i_{5,3} & i_{5,4} & i_{5,5} & i_{5,6} \\
+                    i_{6,1} & i_{6,2} & i_{6,3} & i_{6,4} & i_{6,5} & i_{6,6} \\
                     };
-        \end{tikzpicture}  
+        \end{tikzpicture}
         \hspace{0cm}
         \begin{tikzpicture}
             \matrix [matrix of math nodes] (m)
             {
-                i_{1,1}^{0,0} & i_{1,2}^{0,0} & i_{1,3}^{0,0} & i_{1,4}^{0,1} & i_{1,5}^{0,1} & i_{1,6}^{0,1} \\ 
-                i_{2,1}^{0,0} & i_{2,2}^{0,0} & i_{2,3}^{0,0} & i_{2,4}^{0,1} & i_{2,5}^{0,1} & i_{2,6}^{0,1} \\ 
-                i_{3,1}^{0,0} & i_{3,2}^{0,0} & i_{3,3}^{0,0} & i_{3,4}^{0,1} & i_{3,5}^{0,1} & i_{3,6}^{0,1} \\ 
-                i_{4,1}^{1,0} & i_{4,2}^{1,0} & i_{4,3}^{1,0} & i_{4,4}^{1,1} & i_{4,5}^{1,1} & i_{4,6}^{1,1} \\ 
-                i_{5,1}^{1,0} & i_{5,2}^{1,0} & i_{5,3}^{1,0} & i_{5,4}^{1,1} & i_{5,5}^{1,1} & i_{5,6}^{1,1} \\ 
-                i_{6,1}^{1,0} & i_{6,2}^{1,0} & i_{6,3}^{1,0} & i_{6,4}^{1,1} & i_{6,5}^{1,1} & i_{6,6}^{1,1} \\ 
-                };          
+                i_{1,1}^{0,0} & i_{1,2}^{0,0} & i_{1,3}^{0,0} & i_{1,4}^{0,1} & i_{1,5}^{0,1} & i_{1,6}^{0,1} \\
+                i_{2,1}^{0,0} & i_{2,2}^{0,0} & i_{2,3}^{0,0} & i_{2,4}^{0,1} & i_{2,5}^{0,1} & i_{2,6}^{0,1} \\
+                i_{3,1}^{0,0} & i_{3,2}^{0,0} & i_{3,3}^{0,0} & i_{3,4}^{0,1} & i_{3,5}^{0,1} & i_{3,6}^{0,1} \\
+                i_{4,1}^{1,0} & i_{4,2}^{1,0} & i_{4,3}^{1,0} & i_{4,4}^{1,1} & i_{4,5}^{1,1} & i_{4,6}^{1,1} \\
+                i_{5,1}^{1,0} & i_{5,2}^{1,0} & i_{5,3}^{1,0} & i_{5,4}^{1,1} & i_{5,5}^{1,1} & i_{5,6}^{1,1} \\
+                i_{6,1}^{1,0} & i_{6,2}^{1,0} & i_{6,3}^{1,0} & i_{6,4}^{1,1} & i_{6,5}^{1,1} & i_{6,6}^{1,1} \\
+                };
             \draw[rounded corners,ultra thick, draw=black, fill=red, opacity=0.3] (m-3-1.south west) rectangle (m-1-3.north east);
             \draw[rounded corners,ultra thick, draw=black, fill=green, opacity=0.3] (m-6-1.south west) rectangle (m-4-3.north east);
             \draw[rounded corners,ultra thick, draw=black, fill=yellow, opacity=0.3] (m-3-4.south west) rectangle (m-1-6.north east);
-            \draw[rounded corners,ultra thick, draw=black, fill=blue, opacity=0.3] (m-6-4.south west) rectangle (m-4-6.north east);             
+            \draw[rounded corners,ultra thick, draw=black, fill=blue, opacity=0.3] (m-6-4.south west) rectangle (m-4-6.north east);
             \draw[rounded corners,ultra thick,draw=blue] (m-6-6.south west) rectangle (m-4-6.north east);
             \draw[rounded corners,ultra thick,draw=red] (m-3-3.south west) rectangle (m-1-3.north east);
             \draw[rounded corners,ultra thick,draw=yellow] (m-3-6.south west) rectangle (m-1-6.north east);
@@ -101,36 +343,483 @@ This \texttt{python} package is intended for Lattice theories research.
         \begin{tikzpicture}
             \matrix [matrix of math nodes] (m)
             {
-                i_{1,6}^{0,0} & i_{1,1}^{0,0} & i_{1,2}^{0,0} & i_{1,3}^{0,1} & i_{1,4}^{0,1} & i_{1,5}^{0,1} \\ 
-                i_{2,6}^{0,0} & i_{2,1}^{0,0} & i_{2,2}^{0,0} & i_{2,3}^{0,1} & i_{2,4}^{0,1} & i_{2,5}^{0,1} \\ 
-                i_{3,6}^{0,0} & i_{3,1}^{0,0} & i_{3,2}^{0,0} & i_{3,3}^{0,1} & i_{3,4}^{0,1} & i_{3,5}^{0,1} \\ 
-                i_{4,6}^{1,0} & i_{4,1}^{1,0} & i_{4,2}^{1,0} & i_{4,3}^{1,1} & i_{4,4}^{1,1} & i_{4,5}^{1,1} \\ 
-                i_{5,6}^{1,0} & i_{5,1}^{1,0} & i_{5,2}^{1,0} & i_{5,3}^{1,1} & i_{5,4}^{1,1} & i_{5,5}^{1,1} \\ 
-                i_{6,6}^{1,0} & i_{6,1}^{1,0} & i_{6,2}^{1,0} & i_{6,3}^{1,1} & i_{6,4}^{1,1} & i_{6,5}^{1,1} \\ 
-                };          
+                i_{1,6}^{0,0} & i_{1,1}^{0,0} & i_{1,2}^{0,0} & i_{1,3}^{0,1} & i_{1,4}^{0,1} & i_{1,5}^{0,1} \\
+                i_{2,6}^{0,0} & i_{2,1}^{0,0} & i_{2,2}^{0,0} & i_{2,3}^{0,1} & i_{2,4}^{0,1} & i_{2,5}^{0,1} \\
+                i_{3,6}^{0,0} & i_{3,1}^{0,0} & i_{3,2}^{0,0} & i_{3,3}^{0,1} & i_{3,4}^{0,1} & i_{3,5}^{0,1} \\
+                i_{4,6}^{1,0} & i_{4,1}^{1,0} & i_{4,2}^{1,0} & i_{4,3}^{1,1} & i_{4,4}^{1,1} & i_{4,5}^{1,1} \\
+                i_{5,6}^{1,0} & i_{5,1}^{1,0} & i_{5,2}^{1,0} & i_{5,3}^{1,1} & i_{5,4}^{1,1} & i_{5,5}^{1,1} \\
+                i_{6,6}^{1,0} & i_{6,1}^{1,0} & i_{6,2}^{1,0} & i_{6,3}^{1,1} & i_{6,4}^{1,1} & i_{6,5}^{1,1} \\
+                };
             \draw[rounded corners,ultra thick, draw=black, fill=red, opacity=0.3] (m-3-1.south west) rectangle (m-1-3.north east);
             \draw[rounded corners,ultra thick, draw=black, fill=green, opacity=0.3] (m-6-1.south west) rectangle (m-4-3.north east);
             \draw[rounded corners,ultra thick, draw=black, fill=yellow, opacity=0.3] (m-3-4.south west) rectangle (m-1-6.north east);
-            \draw[rounded corners,ultra thick, draw=black, fill=blue, opacity=0.3] (m-6-4.south west) rectangle (m-4-6.north east);             
+            \draw[rounded corners,ultra thick, draw=black, fill=blue, opacity=0.3] (m-6-4.south west) rectangle (m-4-6.north east);
             \draw[rounded corners,ultra thick,draw=blue] (m-6-1.south west) rectangle (m-4-1.north east);
             \draw[rounded corners,ultra thick,draw=red] (m-3-4.south west) rectangle (m-1-4.north east);
             \draw[rounded corners,ultra thick,draw=yellow] (m-3-1.south west) rectangle (m-1-1.north east);
             \draw[rounded corners,ultra thick,draw=green] (m-6-4.south west) rectangle (m-4-4.north east);
         \end{tikzpicture}
+        \caption{A $6\times6$ lattice (left) split over $2\times2$ ranks (centre; superscripts are the rank coordinates), and the same
+        lattice after a shift by one site along the second axis (right). Every rank keeps its own $3\times3$ block, except the
+        single slice that crosses the boundary (outlined): it comes from the neighbouring rank. Only that slice is communicated.}
         \label{fig:lattice-parallel1}
-        \caption{Lattice partitioning for 4 processes. Halo boundaries are highlighted in the axis 1. }
 \end{figure}
 
-\begin{gather}
-    idx(\mathbf{x},\mathsf{x}) %=\prod_d x_d+\alpha_d N_d + j \eta_d N_d
-\end{gather}
+A shift moves every value by one site, so a rank needs, from its neighbour, only the single slice (a $(D-1)$-dimensional face) that
+crosses the boundary (figure~\ref{fig:lattice-parallel1}). For \code{moveforward(mu)}, ``the value at $\mathbf{x}$ becomes the value at
+$\mathbf{x}+\hat\mu$'':
+\begin{enumerate}
+  \item the first slice along $\mu$ is sent to the $-\mu$ neighbour, and the first slice of the $+\mu$ neighbour is received;
+  \item the local array is rolled by one site along $\mu$ (\code{numpy.roll}), which wraps the first slice around to the end;
+  \item the received slice replaces the last slice, which is the wrapped-around garbage.
+\end{enumerate}
+\code{movebackward} is the mirror image. The exchange is a single \code{MPI_Sendrecv} on the Cartesian communicator
+(\code{CartesianComm.forwardshift/backwardshift}); it uses the datatype of the buffer, so double precision stays double. The
+cost of a shift is the arithmetic on the local array plus a message of the size of a face: the surface-to-volume ratio of the
+local block, which is why larger local grids scale better. A shift along a direction with $m_\mu=1$ is a message to oneself, so
+the same code covers the serial case.
 
-\subsection{communication}
-\subsection{I/O}
+Dimensions are independent: the rank grid may split any subset of them (e.g. \code{--mpigrid=2x2x1x1}), and the choice that gives
+each rank a compact block minimizes the communication.
 
-\texttt{LatticeBase}, \texttt{LatticeMPI}
+\subsection{Collective operations}
+Most operations that cross ranks are \emph{collective}: every rank must call them, in the same order, or the program hangs.
+This includes the shifts, \code{reducesum}, \code{average}, the observables and the checkpoint writes. The code is written
+accordingly: the driver calls \code{sweep} and \code{observables} on every rank, callbacks run on every rank at the same steps,
+and only the printing is done by rank~0 (\code{pprint}). Global reductions of python scalars use
+\code{parallel.allsum(comm, values)}, which sums a number (or a list of numbers) over the ranks with a double-precision
+\code{Allreduce}.
 
-\section{Example}
-Ising Model
+\subsection{Random numbers}
+Each rank draws from its own \code{numpy.random.Generator}, built by \code{rank_rng(seed, comm)} as
+\code{SeedSequence(seed, spawn_key=(rank,))}: the streams of different ranks are statistically independent and nothing is
+communicated. The stream of rank $r$ depends only on the seed and on $r$, so a run is reproducible for a given seed and rank layout.
+The generators are passed explicitly (\code{sweep(rng)}), never taken from a global state; this is also what makes exact restarts
+possible (\S\ref{sec:io}). Note that, as for any domain-decomposed code, the \emph{numbers} of a run depend on the layout of the
+ranks, while the statistics do not.
+
+\subsection{Scaling}
+The lattice classes apply every operation to all the sites at once with numpy, so one process is already about $11\times$ faster than
+the per-site loops the code used originally. Strong scaling at fixed global size ($40^4$ sites, a product of two $2\times2$ matrix
+fields followed by a reduction) on an Apple M4 Pro:
+\begin{center}
+\begin{tabular}{lrrrrr}
+\toprule
+processes & 1 & 2 & 4 & 8 & 10 \\
+\midrule
+time (s)  & 0.129 & 0.066 & 0.035 & 0.029 & 0.022 \\
+speedup   & 1.0   & 2.0   & 3.7   & 4.4   & 5.8 \\
+\bottomrule
+\end{tabular}
+\end{center}
+The scaling is near ideal up to $4$ processes; beyond that each rank has too little work and the fixed costs show.
+Threads do not help (the arithmetic is numpy ufuncs and batched small matrix products, which do not use a threaded BLAS): scale with
+MPI ranks. The benchmark is \code{benchmarks/performance_evaluation.py}.
+
+% ====================================================================================================
+\section{Input/output and restarts}
+\label{sec:io}
+
+\subsection{Parallel HDF5 files}
+\code{pylattice.core.hdf5io} writes a lattice with the parallel HDF5 driver (\code{mpio}): all the ranks write their own sites to the
+same file at the same time, with no gathering. A file holds
+\begin{itemize}
+  \item the dataset \code{value}, with the shape (global sites,$\;$tensor shape) and the precision of the lattice (a double
+        precision field is never rounded on the way to disk; integer spins are written as integers);
+  \item attributes: \code{type} (the lattice class, e.g. \code{LatticeVectorComplexMatrix}), the \emph{global} \code{grid}, and
+        \code{N}, \code{Nd} where they apply; the date and the system (platform, architecture, host, RAM);
+  \item for a checkpoint, \code{step} (the sweep it was saved at) and the state of the random number generators
+        (\code{rng_states}, \code{rng_mpigrid}).
+\end{itemize}
+The global sites are stored in the C order of the \emph{global} lattice, i.e.\ with $X_d=c_dL_d+x_d$ (\S\ref{sec:parallel}),
+\[
+  \operatorname{idx}_{\rm global}(\mathbf{X})=X_{D-1}+G_{D-1}\big(X_{D-2}+G_{D-2}(\cdots+G_1X_0)\big),
+\]
+\emph{independently of how the lattice was split}. A file written on $4$ ranks as $2\times2$ can therefore be read on $2$ ranks
+as $2\times1$, or on one: \code{Reader} and \code{load_into} take the layout of the \emph{reading} run. \code{describe(filename, comm)}
+returns the attributes without reading the data, which is what lets a program check a file (type, lattice, group) before using it.
+
+\subsection{Checkpoints}
+\code{callbacks.Checkpointer(every, directory, prefix, keep, final)} saves the configuration every \code{every} sweeps (and after the
+last one with \code{final}). A checkpoint is written under a temporary name and renamed when it is complete, so a job killed during a
+write never leaves a truncated file; leftovers are removed at the next start. \code{keep=n} keeps only the newest $n$. The files are
+named \code{checkpoints/<run name>_<sweep, 8 digits>.hdf5} (\S\ref{sec:cli}).
+
+\subsection{Exact restarts}
+\code{--start-from file.hdf5} loads the configuration of a checkpoint (the theory first checks that it holds the right field: lattice,
+type, and for a gauge theory that every link is in the group, otherwise the run stops without touching the field). If the rank layout
+is the same as that of the run that wrote it, the state of the random generator of each rank is restored as well
+(\code{restore_rng}), and the run continues \emph{bit for bit}: $3+3$ sweeps from a checkpoint give exactly the same configuration as $6$
+uninterrupted sweeps. This is covered by the tests of every theory. On a different layout the configuration is loaded and the
+generators start afresh.
+
+% ====================================================================================================
+\section{The Monte Carlo framework}
+\label{sec:mc}
+
+\subsection{The model protocol and the driver}
+A \emph{model} (a theory on a given field) is any object with
+\begin{description}
+  \item[\code{sweep(rng)}] one sweep over the lattice; returns \code{(accepted, attempted)}, the counts of this rank;
+  \item[\code{observables()}] a dictionary \code{name -> value}, global (identical on every rank);
+  \item[\code{comm}, \code{rng}] (optional) its communicator and the generator of this rank.
+\end{description}
+\code{montecarlo.run(model, steps, thermalization, measure_every, callbacks, rng)} makes \code{thermalization} sweeps that are not
+measured, then measures the configuration (sweep $0$), then makes \code{steps} sweeps measuring every \code{measure_every}-th. The
+measurements are collected in a \code{History} (sweep, observables, acceptance since the previous measurement; the acceptance of the first
+measurement is \code{None}). \code{montecarlo.metropolis_accept(delta_action, rng)} is the shared Metropolis test: accept with
+probability $\min(1,\ee^{-\Delta S})$, vectorized over the sites.
+
+\subsection{Callbacks}
+A callback is an object called as \code{callback(model, step, observables)} after every sweep (thermalization included), with the optional
+hooks \code{start(model)}, \code{finish(model, step)} and \code{measurement(model, sweep, values, acceptance)}. They run on every rank at
+the same steps, so they may use collective calls. Provided:
+\begin{description}
+  \item[\code{Checkpointer}] saves the configuration and the random states (\S\ref{sec:io});
+  \item[\code{RunLog}] one line of diagnostics every few sweeps: step, the observables, memory, CPU use and sweeps per second;
+  \item[\code{MeasurementFile}] writes every measurement to a JSON file \emph{as soon as it is made}; the file is a valid JSON document after
+        every record (the closing bracket is rewritten each time), so another program can read it while the run goes on, and a job that
+        dies keeps all its measurements. \code{nan} and \code{inf} are written as \code{null}.
+\end{description}
+
+\subsection{The run from the command line}
+\label{sec:cli}
+\code{driver.run_simulation(model, parser, logger)} is the common tail of every theory's \code{main()}: it adds the callbacks every run
+has (the measurement file, the checkpoints if asked, the run log), runs the sweeps and prints a closing summary box. A theory's
+\code{main()} is therefore just
+\begin{lstlisting}[language=Python]
+PP = Parser(argv, theory='ising')            # options (a theory adds its own)
+CC = CartesianComm(mpigrid=PP.mpigrid)
+LL = Logger(debug=PP.debug, logfile=PP.log_filename() is not None, filename=PP.log_filename() or 'run.log')
+LL.banner(PP, CC.comm)                       # logo, system and run information in boxes
+rng = CC.rng(PP.seed)
+field = IsingField(grid=PP.grid, cartesiancomm=CC, initialization='hot', seed=rng)
+model = IsingModel(field=field, logger=LL.log, beta=PP.beta, rng=rng)
+run_simulation(model, PP, LL)
+\end{lstlisting}
+
+\paragraph{Common options.}
+\begin{center}
+\begin{tabular}{lp{9cm}}
+\toprule
+option & meaning \\
+\midrule
+\code{--grid AxB..}, \code{--mpigrid AxB..} & local lattice of each rank, and ranks along each direction \\
+\code{--steps N} & sweeps that are measured, after the thermalization \\
+\code{--thermalization N} & sweeps made first, not measured \\
+\code{--measure-every N} & measure every $N$ sweeps \\
+\code{--beta B} & inverse coupling / temperature \\
+\code{--seed S} & seed of the random streams \\
+\code{--checkpoint-every N} & save a checkpoint every $N$ sweeps and at the end (0: never) \\
+\code{--runlog-every N} & one log line every $N$ sweeps (default: about 20 per run) \\
+\code{--start-from FILE} & restart from a checkpoint \\
+\code{--logfile FILE|off} & name of the log file (default: from the run name) \\
+\code{--debug}, \code{--progress} & debug logging from every rank; a progress bar \\
+\bottomrule
+\end{tabular}
+\end{center}
+A theory subclasses \code{Parser} to add options (\code{add_options}) and to list them in the banner (\code{extra_info}).
+
+\paragraph{Logging.} \code{Logger} prints a logo and boxed, coloured panels with the system (OS, architecture, CPU, MPI, \code{h5py},
+library versions, git revision), the parallel layout and the run parameters; then one line per \code{--runlog-every} sweeps and a
+final summary box. The log file holds the same, in plain text, so a run is documented by its own log.
+
+\paragraph{File naming.} Every file of a run starts with the \emph{run name}
+\begin{center}
+\texttt{<theory>\_grid<grid>\_mpi<mpigrid>\_b<beta>}, \quad e.g.\ \texttt{su3\_grid4x4x8x8\_mpi2x2x1x1\_b5.7},
+\end{center}
+with \code{theory} $\in\{$\code{ising}, \code{su<N>}, \code{so<N>}$\}$, the grids as given on the command line, and $\beta$ as the
+shortest exact number ($10.0\to10$). The suffixes are \code{.log}, \code{_meas.json}, and \code{_<sweep>.hdf5} (in \code{./checkpoints}).
+Offline outputs add \code{_meas_offline}; figures are \code{<run name>_<observable>.png}. A file thus says what it is and where it
+comes from. The names are built only by \code{Parser.run_name()}, \code{log_filename()}, \code{meas_filename()},
+\code{checkpoint_prefix()} and \code{cli.offline_name(files)}.
+
+% ====================================================================================================
+\section{Measurements and statistics}
+\label{sec:offline}
+
+\subsection{Cheap observables online, expensive ones offline}
+During a run a theory measures only cheap observables (Ising: magnetization and energy; gauge theories: the plaquette and the action).
+Expensive observables (Polyakov loop, Wilson loops, Creutz ratios) are measured \emph{offline} on the stored configurations:
+\code{measure.measure_files(files, measure, comm, filename)} calls \code{measure(path)} on every checkpoint, in the order of the steps,
+and writes a measurements file of the same format as a run's (\code{<run name>_meas_offline.json}), with the step of the checkpoint as the
+sweep. The offline lattice is that of the files; \code{--mpigrid} chooses how to split it over the ranks, which need not be the layout of the
+run that wrote them. A theory supplies only \code{measure(path)}; see \code{ising_meas.py}, \code{sun_meas.py}, \code{son_meas.py}.
+This keeps the Monte Carlo fast and lets the same configurations be measured again with other observables.
+
+\subsection{Statistical analysis}
+\label{sec:stats}
+Monte Carlo data are correlated in the Markov time. \code{pylattice.core.stats} provides two estimators, both used by
+\code{plot_meas}:
+\begin{itemize}
+  \item \code{mean_error(x, blocks=20)}: mean and error by batch means. The series is cut into \code{blocks} consecutive pieces; the error
+        is the standard deviation of the piece means divided by $\sqrt{\text{blocks}}$. It is right when the pieces are much longer than the
+        autocorrelation time.
+  \item \code{uwerr(x)}: mean, error and the integrated autocorrelation time $\tau_{\rm int}$ by the $\Gamma$-method of Wolff~\cite{Wolff04}. With the
+        normalized autocorrelation function $\rho(t)$,
+        \begin{equation}
+           \tau_{\rm int}=\tfrac12+\sum_{t=1}^{W}\rho(t),\qquad \sigma^2_{\bar x}=\frac{2\tau_{\rm int}}{n}\,\Gamma(0),
+        \end{equation}
+        with the summation window $W$ chosen automatically; the error on $\tau_{\rm int}$ is also given.
+\end{itemize}
+\code{python -m pylattice.utils.plot_meas FILE.json [--skip N] [--outdir DIR] [--no-plot]} prints, for every observable and for the
+acceptance, the number of points, mean, error, $\tau_{\rm int}$ and its error, and writes one figure per quantity against the sweep.
+Averages of derived quantities (susceptibility, specific heat, Creutz ratios from averaged loops) should be formed from the averages
+of the stored observables, not configuration by configuration.
+
+% ====================================================================================================
+\section{Groups}
+\label{sec:groups}
+
+All the variables of a theory take values in a group, behind the interface \code{groups.base.Group}: \code{identity(size)},
+\code{random(rng, size)} (uniform: Haar), \code{multiply}, \code{inverse}, \code{project} (the nearest element), \code{contains}.
+\code{groups.lie.LieGroup} adds, for Lie groups, \code{dim}, \code{generators()}, \code{exp(w)}, \code{log(g)} and
+\code{near_identity(eps, rng, size)}. Elements are numpy arrays of any batch shape: the group fixes the shape of one element, and an
+array of elements has shape \code{size + shape}. A theory written against this interface works for any group that implements it.
+
+\subsection{Discrete groups}
+$\mathbb{Z}_2$ has the elements $\pm1$ (int8, one byte per spin); $\mathbb{Z}_q$ the roots of unity $\ee^{2\pi\ii k/q}$ (the clock model;
+$\mathbb{Z}_3$ is the 3-state Potts model). They provide the exact heat bath for a value with neighbour sum $h$.
+
+\subsection{$SU(2)$}
+\label{sec:su2}
+Generators $T_a=\sigma_a/2$, $[T_a,T_b]=\ii\epsilon_{abc}T_c$, $\tr(T_aT_b)=\tfrac12\delta_{ab}$; the group element of the algebra vector
+$w$ is $\exp(\ii\,w\!\cdot\!T)$. The \emph{quaternionic representation of Creutz} is used for speed: $U=a_0+\ii\,\mathbf{a}\!\cdot\!\boldsymbol\sigma$
+with $|q|^2=a_0^2+\mathbf{a}^2=1$, so $\tfrac12\tr U=a_0$, $U^\dagger=(a_0,-\mathbf{a})$ and products are quaternion products on a whole
+lattice of links at once. A general $2\times2$ matrix has a decomposition $M=kW$ with $k\ge0$, $W\in SU(2)$ (the SU(2) part of $M$,
+\code{su2_decompose}), which is what the updates need: $\Re\tr(XM)$ for $X\in SU(2)$ sees only the real-quaternion part of $M$.
+
+\paragraph{Heat bath of a link.} For the link weight $\exp(c\,\Re\tr(UM))$ with $M=kW$, the matrix $X=UW$ has the density
+$\propto\exp(2ck\,x_0)$ on $S^3$, i.e.\ $x_0$ has the density $\propto\sqrt{1-x_0^2}\,\ee^{\alpha x_0}$ with $\alpha=2ck$ and the direction of
+$\mathbf{x}$ is uniform. $x_0$ is drawn exactly by rejection (the algorithms of Creutz~\cite{Creutz80} and of Kennedy and Pendleton~\cite{KP85} are both implemented).
+
+\subsection{$SU(N)$}
+\label{sec:sun}
+Generators: the $N^2-1$ generalized Gell-Mann matrices $T_a$ (for $N=2$, $\sigma_a/2$; $N=3$, $\lambda_a/2$), hermitian and traceless, with
+\begin{equation}
+  \tr(T_aT_b)=\tfrac12\delta_{ab},\qquad [T_a,T_b]=\ii f_{abc}T_c,\qquad \{T_a,T_b\}=\tfrac1N\delta_{ab}+d_{abc}T_c ,
+\end{equation}
+and the structure constants $f_{abc}$ and $d_{abc}$ are computed from the generators. \code{exp_algebra(w)} computes $\exp(\ii w\!\cdot\!T)$ by the
+eigendecomposition of the hermitian matrix, and \code{log_algebra(U)} inverts it using the common eigenbasis of $(U+U^\dagger)/2$ and
+$(U-U^\dagger)/2\ii$ with the eigenphases shifted so that they sum to zero. Haar-random elements are the $Q$ factor of the QR decomposition
+of a complex Gaussian matrix (phases of $R$ fixed), divided by an $N$-th root of its determinant. \code{near_identity_su(N, eps)} draws
+$\exp(\ii w\!\cdot\!T)$ with $w=2\arcsin(\epsilon)\,\hat n$ in a uniformly random direction $\hat n$ (the set is closed under inversion, so a
+Metropolis step is symmetric); \code{project_su} gives the nearest element by the polar decomposition (SVD) with the determinant fixed.
+
+\paragraph{Cabibbo--Marinari.} There is no exact heat bath for $N>2$. Following Cabibbo and Marinari~\cite{CM82}, the link is instead updated through the $N(N-1)/2$ $SU(2)$ subgroups
+$(i,j)$ that act on the rows and columns $i,j$ and as the identity elsewhere; together they generate $SU(N)$. For the weight
+$\exp(c\,\Re\tr(UV))$, $V$ the sum of the staples (\S\ref{sec:gauge}), the step of the subgroup $(i,j)$ is $U\to XU$ with $X$ in the subgroup
+drawn from its \emph{exact} conditional distribution: only the block $(i,j)$ of $UV$ enters $\Re\tr(XUV)$, so $X$ is the SU(2) heat bath on
+that block (\S\ref{sec:su2}). Every step leaves the target distribution invariant, so a sweep over the subgroups does too, and the
+update is always accepted. For $N=2$ there is a single subgroup, the whole group.
+
+\paragraph{Overrelaxation.} In each subgroup, with $kW$ the SU(2) part of the block $(i,j)$ of $UV$, the move $U\to XU$, $X=(W^\dagger)^2$ in the
+subgroup, keeps $\Re\tr(UV)$ (indeed $XUV|_{\rm block}\to kW^\dagger$) and is its own inverse, so it is a microcanonical move, always accepted,
+that carries the link as far as it can on the surface of constant action (Brown and Woch~\cite{BrownWoch87}, Creutz~\cite{Creutz87}). It is not ergodic: it is mixed with heat bath steps.
+
+\subsection{$SO(N)$}
+\label{sec:son}
+$SO(N)$ is the group of real orthogonal $N\times N$ matrices with determinant $+1$ (the connected component of $O(N)$), of dimension $N(N-1)/2$. The
+generators are $T_a=\ii A_{ij}/\sqrt2$ for each pair $i<j$, with $A_{ij}=E_{ij}-E_{ji}$ the rotation in the plane $(i,j)$: hermitian, purely
+imaginary, $\tr(T_aT_b)=\delta_{ab}$, and $\exp(\ii w\!\cdot\!T)=\exp(-w\!\cdot\!A/\sqrt2)$ is real. Haar-random elements: the $Q$ of the QR decomposition
+of a real Gaussian matrix with the signs of $R$ fixed (uniform on $O(N)$), the first column reversed where $\det=-1$. The projection is the polar
+decomposition with the smallest singular direction reversed where $\det<0$. $SO(3)$ is the adjoint representation of $SU(2)$ and $SO(4)\simeq
+(SU(2)\times SU(2))/\mathbb{Z}_2$ locally, which the tests use as checks; $SO(2)=U(1)$.
+
+\paragraph{Cabibbo--Marinari with $SO(2)$ planes.} The rotations $R_{ij}(\theta)$ in the coordinate planes are $N(N-1)/2$ $SO(2)$ subgroups that
+generate $SO(N)$ (since $[L_{ij},L_{jk}]=L_{ik}$). For the weight $\exp(c\tr(UV))$ and $M=UV$, the link $R_{ij}(\theta)U$ has
+\begin{equation}
+  \tr(R_{ij}(\theta)M)=\text{const}+\cos\theta\,(M_{ii}+M_{jj})+\sin\theta\,(M_{ij}-M_{ji})=\text{const}+a\cos(\theta-\theta_0),
+\end{equation}
+\begin{equation}
+  a=\sqrt{(M_{ii}+M_{jj})^2+(M_{ij}-M_{ji})^2},\qquad \theta_0=\operatorname{atan2}(M_{ij}-M_{ji},\,M_{ii}+M_{jj}).
+\end{equation}
+So the conditional density of $\theta$ is the \emph{von Mises} distribution $\propto\exp(c\,a\cos(\theta-\theta_0))$, which is sampled exactly: for
+$\kappa=ca<1$ by rejection from the uniform distribution (accept with probability $\ee^{\kappa(\cos\theta-1)}$), for $\kappa\ge1$ by the algorithm of
+Best and Fisher~\cite{BestFisher79} with a wrapped-Cauchy proposal. Unlike $SU(2)$, the block needs no decomposition: the reflection part of the $2\times2$ block drops out
+of the trace. $SO(2)$ is abelian with a single plane, so for $N=2$ the step is the exact heat bath of the whole group and needs no special code.
+\emph{Overrelaxation} reflects $\theta\to2\theta_0-\theta$, i.e.\ $U\to R_{ij}(2\theta_0)U$: the weight is unchanged and the step is an involution
+($\theta_0\to-\theta_0$). The literature simulates $SO(N)$ with a ``natural extension of the $SU(N)$ Cabibbo--Marinari heat bath''
+\cite{BLT13,ALT16,LT17}, without overrelaxation (the papers do not spell out the subgroups: the choice of the planes is the derivation made here); the choice of the rotation planes as the subgroups is the natural analogue of the
+$SU(2)$ blocks.
+
+% ====================================================================================================
+\section{Gauge fields and observables}
+\label{sec:gauge}
+
+\subsection{Fields}
+A gauge field has one group element $U_\mu(x)$ on each link $(x,\mu)$, stored as a lattice of vectors of matrices of shape (sites,$N_d$,$N$,$N$):
+\code{SUNField} (complex, $SU(N)$), \code{SU2Field} (its $N=2$ case, with the quaternionic fast paths for the hot start, the projection and the proposals),
+\code{SONField} (real, $SO(N)$). Each provides the starts (cold: all links the identity; hot: independent Haar-random links), \code{unitarize()}
+(projection onto the group, removing the rounding errors of long products), \code{near_identity} and the random gauge transformation. Everything else is
+written once for every gauge group in \code{GaugeLinksMixin} (\code{core/groups/gauge_observables.py}), using only lattice operations. \code{gauge_field(grid, cc, Nd, N, rng, group='su'|'so')} is the factory.
+
+\subsection{Plaquettes, staples and the Wilson action}
+With $\hat\mu$ the unit vector in direction $\mu$, the plaquette and the staple sum are
+\begin{align}
+  P_{\mu\nu}(x) &= U_\mu(x)\,U_\nu(x+\hat\mu)\,U_\mu^\dagger(x+\hat\nu)\,U_\nu^\dagger(x),\\
+  V_\mu(x)&=\sum_{\nu\ne\mu}\Big[U_\nu(x+\hat\mu)U_\mu^\dagger(x+\hat\nu)U_\nu^\dagger(x)
+          +U_\nu^\dagger(x+\hat\mu-\hat\nu)U_\mu^\dagger(x-\hat\nu)U_\nu(x-\hat\nu)\Big],
+\end{align}
+so that $\Re\tr\big(U_\mu(x)V_\mu(x)\big)$ is the sum of the $2(N_d-1)$ plaquettes that contain the link. The Wilson action~\cite{Wilson74} is
+\begin{equation}
+  S=\beta\sum_{x}\sum_{\mu<\nu}\Big(1-\tfrac1N\Re\tr P_{\mu\nu}(x)\Big),\qquad \text{weight }\ee^{-S},\qquad \beta=\frac{2N}{g^2}
+  \label{eq:wilson}
+\end{equation}
+(for $SU(N)$ and for $SO(N)$, the convention of the $SO(N)$ literature). As a function of a single link the weight is
+$\exp\!\big(\tfrac{\beta}{N}\Re\tr(UV)\big)$, which fixes the coupling $c=\beta/N$ given to the heat bath. The code provides
+\begin{description}
+  \item[\code{Plaq(pairs=None)}] $\frac1N\tr P$ averaged over all sites and all \emph{ordered} pairs $\mu\ne\nu$ (a complex number: since
+        $P_{\nu\mu}=P_{\mu\nu}^\dagger$ the imaginary part vanishes up to rounding, which is a consistency check of the links and of the shifts; exactly $0$ for real
+        links). With \code{pairs} one separates, e.g., spatial from temporal plaquettes.
+  \item[\code{Action(beta)}] the action (\ref{eq:wilson}), summed over $\mu<\nu$ and taking the real part.
+  \item[\code{Staple(mu)}] the staple sum $V_\mu$ of every link in direction $\mu$.
+\end{description}
+
+\subsection{Loops}
+\code{line(mu, length)} is the product of \code{length} links along $\mu$; \code{loop_field(mu, nu, R, T)} the $R\times T$ rectangular loop
+$\mathrm{line}_\mu(R)(x)\,\mathrm{line}_\nu(T)(x+R\hat\mu)\,\mathrm{line}_\mu(R)^\dagger(x+T\hat\nu)\,\mathrm{line}_\nu(T)^\dagger(x)$, and
+\begin{itemize}
+  \item \code{Wilson(R, T)} $=\frac1N\tr$ of the $R\times T$ loops averaged over sites and ordered pairs. The reverse of a loop has the conjugate
+        trace, so the imaginary part is zero for $R=T$ and for real traces ($SU(2)$, $SO(N)$), but not for $SU(N\!\ge\!3)$ with $R\ne T$: the physical
+        quantity is the real part.
+  \item \code{Polyakov(mu)} $=\frac1N\tr\prod_{t}U_\mu(x+t\hat\mu)$ along the whole extent of direction $\mu$ (periodic), averaged over the other
+        coordinates. The time is the last direction. Its mean vanishes in the confined phase, where the centre symmetry ($\mathbb{Z}_N$ for $SU(N)$,
+        $\mathbb{Z}_2$ for $SO(2N)$) is unbroken; the tests verify that multiplying the temporal links of one time slice by a centre element leaves the action unchanged and rotates the Polyakov loop.
+  \item The \emph{Creutz ratios} $\chi(R,R)=-\ln\dfrac{W(R,R)\,W(R-1,R-1)}{W(R-1,R)^2}$ (offline), from which the string tension is read. They are
+        computed from loop averages: averaging $\chi$ configuration by configuration is wrong.
+\end{itemize}
+
+\subsection{Gauge transformations}
+\code{gauge_transform(g=None)} returns a new field with $U'_\mu(x)=g(x)\,U_\mu(x)\,g^\dagger(x+\hat\mu)$ for a group element $g(x)$ on every site (random if
+\code{g=None}), leaving the original unchanged. Every gauge-invariant quantity (\code{Plaq}, \code{Action}, loops, Polyakov loops) is the same on both fields; the tests check this on
+several rank layouts, and with the explicit $U(1)$ case $a_\mu\to a_\mu+\chi(x)-\chi(x+\hat\mu)$ for $SO(2)$.
+
+% ====================================================================================================
+\section{Theories}
+\label{sec:theories}
+
+\subsection{Ising model}
+Spins $s_i=\pm1$ (group $\mathbb{Z}_2$, \code{int8}) on the sites of a $D$-dimensional lattice, $H=-\sum_{\langle ij\rangle}s_is_j$, weight $\ee^{-\beta H}$
+(\code{theories/spin/ising.py}). The sweep is a checkerboard Metropolis update: first the even sites, then the odd ones. A spin at an even site has only odd
+neighbours, so all the even spins can be updated simultaneously; the flip of $s_i$ costs $\Delta E_i=2s_i\sum_{j\in nn(i)}s_j$ and is accepted with probability
+$\min(1,\ee^{-\beta\Delta E_i})$ (Metropolis~\cite{Metropolis53}). The neighbour sum is built from \code{shift_forward} and \code{shift_backward} in each direction, so it crosses the rank boundaries without
+any explicit communication in the theory. Observables per site: the magnetization $m$, and the energy $e$; the offline tool also gives
+\code{abs_m}, \code{m2}, \code{e2}, from which susceptibility and specific heat follow. The critical coupling in two dimensions is
+$\beta_c=\tfrac12\ln(1+\sqrt2)\approx0.4407$~\cite{Onsager44}.
+
+\subsection{$SU(N)$ and $SO(N)$ gauge theories}
+The Wilson action (\ref{eq:wilson}) on a $D$-dimensional lattice ($D=4$ by default), implemented in \code{theories/gauge/sun.py} and \code{son.py}; the latter
+inherits the model and the parser of the former and only supplies the group-specific steps of \code{core/groups/so.py}.
+
+\paragraph{The checkerboard of links.} Two links of the same direction $\mu$ on sites of the same parity never belong to the same plaquette. So the staple of each of them contains no link
+that is updated at the same time, and all of them are updated independently and at once. A sweep updates, for each direction $\mu$ and for each parity, the links of direction $\mu$ on the sites of that parity,
+with the staple computed on the lattice with the current values of all other links. The local grid must be even.
+
+\paragraph{Algorithms.} Selected with \code{--algorithm}:
+\begin{description}
+  \item[\code{heatbath}] (default) the Cabibbo--Marinari heat bath over the subgroups of the group (SU(2) blocks or SO(2) planes), always accepted; the exact heat
+        bath for $SU(2)$ and $SO(2)$.
+  \item[\code{metropolis}] $U'=XU$ with $X$ at a distance \code{--eps} from the identity (a symmetric proposal), \code{--hits} proposals per link and visit,
+        accepted with probability $\min(1,\ee^{-\Delta S})$, $\Delta S=-\tfrac{\beta}{N}\Re\tr\big((U'-U)V\big)$. The acceptance is measured; choose \code{--eps} for $0.4$--$0.6$.
+  \item[\code{--overrelax n}] after the heat bath or Metropolis update, $n$ overrelaxation sweeps (microcanonical, always accepted).
+\end{description}
+After each sweep the field is projected back onto the group (\code{unitarize()}), so rounding errors do not accumulate.
+
+\paragraph{Observables.} Online: \code{plaq_re}, \code{plaq_im}, \code{action} (per site, summed over planes: $\tfrac{N_d(N_d-1)}2\beta(1-\code{plaq\_re})$) and the acceptance. Offline
+(\code{sun_meas}, \code{son_meas}): \code{plaq_s}, \code{plaq_t} (spatial and temporal plaquettes), \code{polyakov}, \code{polyakov_abs}, the Wilson loops \code{W<R><T>}, and the Creutz
+ratios \code{creutz22}, \dots. Defaults: $SU(2)$ $\beta=2.3$, $SU(3)$ $\beta=5.7$, $SO(2)$ $\beta=1.0$; otherwise \code{--beta} is required.
+$SO(3)$ is the adjoint-representation $SU(2)$ theory, which has a bulk transition at weak coupling in four dimensions~\cite{BLT13,dFJ03}.
+
+\paragraph{Checks.} Nothing in the tests runs a real Monte Carlo (\S\ref{sec:tests}); the algorithms are verified by exact identities: the change of the action of a link update equals the change of the whole
+action, over a Metropolis sweep the action changes by the sum of the accepted changes, overrelaxation leaves the action unchanged, and the heat bath is called with the coupling $\beta/N$ and the field's staple.
+For $SO(2)$ in $D=2$ the average plaquette in the infinite-statistics limit is $\langle\cos\theta_P\rangle=I_1(\beta)/I_0(\beta)$, a benchmark for a real run.
+
+% ====================================================================================================
+\section{Writing a new theory}
+\label{sec:newtheory}
+
+A theory needs three things: a field (a lattice class), a model with \code{sweep} and \code{observables}, and a \code{main()}. As an example, a $\mathbb{Z}_2$ Metropolis model in the style of the Ising one:
+\begin{lstlisting}[language=Python]
+class MyModel:
+    def __init__(self, field, logger, beta, rng=None):
+        self.field, self.log, self.beta = field, logger, beta
+        self.rng = rng if rng is not None else field.cartesiancomm.rng(0)
+
+    @property
+    def comm(self):
+        return self.field.cartesiancomm.comm
+
+    def sweep(self, rng=None):
+        rng = self.rng if rng is None else rng
+        accepted = 0
+        for parity in range(2):                       # checkerboard: independent sites at once
+            half = self.field.peek_EO_lattices()[parity]
+            dS = ...                                  # from shift_forward / shift_backward, no MPI here
+            flip = montecarlo.metropolis_accept(dS.value, rng)
+            ...                                       # update `half`, then poke_EO_lattices back
+            accepted += int(flip.sum())
+        return accepted, self.field.value.size        # this rank's counts
+
+    def observables(self):
+        return {'obs': float(self.field.average())}   # global: the same on every rank
+\end{lstlisting}
+For a command line, subclass \code{Parser} (\code{add_options}, \code{extra_info}), build the field and the model as in \code{ising.main()} and call
+\code{run_simulation}. Checkpoints need only that the model has a \code{field} attribute that is a lattice; offline measurements need a
+\code{measure(path)} function passed to \code{measure_files}. For a new gauge group: implement the group in \code{core/groups} (the interface of \S\ref{sec:groups} and the
+Cabibbo--Marinari steps), a field class that puts \code{GaugeLinksMixin} in front of the appropriate lattice class, and a model that overrides
+\code{heatbath_links} and \code{overrelaxed_links} of \code{SUNModel}.
+
+% ====================================================================================================
+\section{Tests and continuous integration}
+\label{sec:tests}
+
+\subsection{Principles}
+\begin{itemize}
+  \item \textbf{No real Monte Carlo in the tests.} Algorithms are verified by exact identities (action changes, invariances, involutions, closed forms) and by
+        a few sweeps on tiny lattices, never by statistics of long runs. The few statistical checks are vectorized samplings of a distribution with
+        tolerances of five standard errors.
+  \item \textbf{Parallel behaviour is tested against serial references.} The observables of a lattice split over $2$ or $4$ ranks are compared with an \code{np.roll}
+        computation on the whole lattice, along every direction of the split, including loops that cross the boundaries.
+  \item \textbf{Dual-mode tests.} A test file runs under \code{pytest} (one process) and as a script under \code{mpiexec -n 2 python test_file.py}
+        (also on $1$ and $4$ ranks); tests that need parallel HDF5 are skipped, and reported as such, when it is missing.
+  \item \textbf{Mutation checks.} Deliberately breaking the code (a wrong coupling, a missing factor, a wrong sign) must make a test fail; several tests exist precisely
+        because such a mutation once survived.
+\end{itemize}
+
+\subsection{The routine}
+\code{python run_tests.py} lists every test of the repository and runs them: \code{pytest} on one process, the MPI scripts on the
+rank counts they are written for, and the HDF5 tests on $4$ ranks and across layouts ($4\to2$). \code{--quick}, \code{--full} and \code{--chunk core|gauge|spin} select subsets;
+a test checks that no test file of the repository is missing from the routine.
+
+\subsection{Continuous integration}
+\label{sec:ci}
+The tests are split into three chunks, each with its own GitHub workflow and badge: \code{tests-core.yml} (tensors, lattices, MPI, command line, random streams, statistics, driver,
+checkpoints), \code{tests-gauge.yml} (the groups and the gauge theories), \code{tests-spin.yml} (the Ising model and the printing/plotting of measurements). A workflow runs on a push only
+if a file that its chunk covers has changed: the source files its tests import (computed from the real imports, including lazy ones and modules run in a subprocess), the tests, and the
+files that configure the run. A change in a gauge theory runs only \code{gauge}; a change in the shared code (e.g.\ \code{grid.py}) runs all three; the documentation runs nothing. The workflows can also be
+started by hand (\code{workflow_dispatch}); there is no schedule. \code{tests/utils/test_ci_paths.py} fails if a filter misses a file that its chunk imports. The runners do not have parallel
+\code{h5py}, so the checkpoint, restart and offline tests are skipped there and run locally.
+
+% ====================================================================================================
+\begin{thebibliography}{99}
+\addcontentsline{toc}{section}{References}
+
+\bibitem{Wilson74} K.~G. Wilson, \emph{Confinement of quarks}, Phys.\ Rev.\ D10 (1974) 2445.
+\bibitem{Metropolis53} N.~Metropolis, A.~W. Rosenbluth, M.~N. Rosenbluth, A.~H. Teller, E.~Teller, \emph{Equation of state calculations by fast computing machines}, J.\ Chem.\ Phys.\ 21 (1953) 1087.
+\bibitem{Onsager44} L.~Onsager, \emph{Crystal statistics. I. A two-dimensional model with an order-disorder transition}, Phys.\ Rev.\ 65 (1944) 117.
+\bibitem{Creutz80} M.~Creutz, \emph{Monte Carlo study of quantized SU(2) gauge theory}, Phys.\ Rev.\ D21 (1980) 2308.
+\bibitem{KP85} A.~D. Kennedy, B.~J. Pendleton, \emph{Improved heatbath method for Monte Carlo calculations in lattice gauge theories}, Phys.\ Lett.\ B156 (1985) 393.
+\bibitem{CM82} N.~Cabibbo, E.~Marinari, \emph{A new method for updating SU(N) matrices in computer simulations of gauge theories}, Phys.\ Lett.\ B119 (1982) 387.
+\bibitem{BrownWoch87} F.~R. Brown, T.~J. Woch, \emph{Overrelaxed heat-bath and Metropolis algorithms for accelerating pure gauge Monte Carlo calculations}, Phys.\ Rev.\ Lett.\ 58 (1987) 2394.
+\bibitem{Creutz87} M.~Creutz, \emph{Overrelaxation and Monte Carlo simulation}, Phys.\ Rev.\ D36 (1987) 515.
+\bibitem{BestFisher79} D.~J. Best, N.~I. Fisher, \emph{Efficient simulation of the von Mises distribution}, Appl.\ Statist.\ 28 (1979) 152.
+\bibitem{Wolff04} U.~Wolff, \emph{Monte Carlo errors with less errors}, Comput.\ Phys.\ Commun.\ 156 (2004) 143.
+\bibitem{BLT13} F.~Bursa, R.~Lau, M.~Teper, \emph{SO(2N) and SU(N) gauge theories in 2+1 dimensions}, JHEP 05 (2013) 025, arXiv:1208.4547.
+\bibitem{ALT16} A.~Athenodorou, R.~Lau, M.~Teper, \emph{On the weak N-dependence of SO(N) and SU(N) gauge theories in 2+1 dimensions}, JHEP 03 (2016) 072, arXiv:1510.07841.
+\bibitem{LT17} R.~Lau, M.~Teper, \emph{SO(N) gauge theories in 2+1 dimensions}, JHEP 10 (2017) 022, arXiv:1701.06941.
+\bibitem{dFJ03} P.~de Forcrand, O.~Jahn, \emph{Comparison of SO(3) and SU(2) lattice gauge theory}, Nucl.\ Phys.\ B651 (2003) 125, arXiv:hep-lat/0211004.
+
+\end{thebibliography}
 
 \end{document}
