@@ -6,7 +6,9 @@ Run on one process or on several ranks:
     mpiexec -n 4 python tests/theories/spin/test_ising_meas.py        # 1, 2 or 4 ranks
 """
 import contextlib
+import importlib.util
 import json
+import sys
 import os
 import shutil
 import tempfile
@@ -14,6 +16,12 @@ import tempfile
 import numpy as np
 import pytest
 from mpi4py import MPI
+
+if importlib.util.find_spec('h5py') is None:               # these tests read and write checkpoints
+    if __name__ == '__main__':
+        print('[-] skipped: h5py is not installed')
+        sys.exit(0)
+    pytest.skip('h5py is not installed', allow_module_level=True)
 
 from pylattice.core.callbacks import Checkpointer, MeasurementFile
 from pylattice.core.grid import LatticeReal
@@ -26,7 +34,14 @@ from pylattice.theories.spin.ising import IsingField, IsingModel
 COMM = MPI.COMM_WORLD
 RANK, SIZE = COMM.Get_rank(), COMM.Get_size()
 MPIGRID = {1: [1, 1], 2: [2, 1], 4: [2, 2]}[SIZE]
-HDF5 = pytest.mark.skipif(not (lambda: __import__('h5py').get_config().mpi)(), reason='h5py with parallel HDF5 is not installed')
+def parallel_hdf5():
+    import h5py
+    return bool(h5py.get_config().mpi)
+
+
+def HDF5(f):
+    f.needs_hdf5 = True                                  # the script runner below skips it too
+    return pytest.mark.skipif(not parallel_hdf5(), reason='h5py with parallel HDF5 is not installed')(f)
 
 
 @contextlib.contextmanager
@@ -145,6 +160,10 @@ if __name__ == '__main__':
     import traceback
     tests = [(name, f) for name, f in sorted(globals().items()) if name.startswith('test_') and callable(f)]
     for name, f in tests:
+        if getattr(f, 'needs_hdf5', False) and not parallel_hdf5():
+            if RANK == 0:
+                print('[-] {} skipped: no h5py with parallel HDF5'.format(name))
+            continue
         try:
             f()
         except BaseException:

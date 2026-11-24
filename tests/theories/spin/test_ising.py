@@ -447,7 +447,9 @@ def _shared_tempdir():
             shutil.rmtree(path, ignore_errors=True)
 
 
-needs_hdf5 = pytest.mark.skipif(not _parallel_hdf5(), reason='h5py with parallel HDF5 is not installed')
+def needs_hdf5(f):
+    f.needs_hdf5 = True                                  # the script runner below skips it too
+    return pytest.mark.skipif(not _parallel_hdf5(), reason='h5py with parallel HDF5 is not installed')(f)
 
 
 @needs_hdf5
@@ -560,6 +562,10 @@ if __name__ == '__main__':
     import traceback
     tests = [(name, f) for name, f in sorted(globals().items()) if name.startswith('test_') and callable(f)]
     for name, f in tests:
+        if getattr(f, 'needs_hdf5', False) and not _parallel_hdf5():
+            if MPI.COMM_WORLD.Get_rank() == 0:
+                print('[-] {} skipped: no h5py with parallel HDF5'.format(name))
+            continue
         try:
             f()
         except BaseException:
