@@ -3,7 +3,7 @@ from multiprocessing import cpu_count, Manager, Array
 from threading import Thread
 from multiprocessing import Process
 #from queue import Queue
-from linalg.tensors import *
+from pylattice.core.tensors import *
 import ctypes
 import time
 

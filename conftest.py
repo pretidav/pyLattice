@@ -1,0 +1,3 @@
+# Intentionally empty. Its presence makes pytest put the repository root on
+# sys.path, so tests in tests/ can import lattice, linalg, mpi, IO, SUn, ...
+# When running a test as a plain script, use PYTHONPATH=. (see README).

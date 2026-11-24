@@ -1,0 +1,15 @@
+\BOOKMARK [1][-]{section.1}{Introduction}{}% 1
+\BOOKMARK [1][-]{section.2}{Linear Algebra}{}% 2
+\BOOKMARK [2][-]{subsection.2.1}{Scalar}{section.2}% 3
+\BOOKMARK [2][-]{subsection.2.2}{Vectors}{section.2}% 4
+\BOOKMARK [2][-]{subsection.2.3}{Matrix}{section.2}% 5
+\BOOKMARK [2][-]{subsection.2.4}{Matrix Vector}{section.2}% 6
+\BOOKMARK [1][-]{section.3}{Lattice Objects}{}% 7
+\BOOKMARK [2][-]{subsection.3.1}{Lattice Scalar}{section.3}% 8
+\BOOKMARK [2][-]{subsection.3.2}{Lattice Matrix}{section.3}% 9
+\BOOKMARK [2][-]{subsection.3.3}{Lattice Vector}{section.3}% 10
+\BOOKMARK [2][-]{subsection.3.4}{Lattice Vector Matrix}{section.3}% 11
+\BOOKMARK [1][-]{section.4}{Parallelization}{}% 12
+\BOOKMARK [2][-]{subsection.4.1}{communication}{section.4}% 13
+\BOOKMARK [2][-]{subsection.4.2}{I/O}{section.4}% 14
+\BOOKMARK [1][-]{section.5}{Example}{}% 15
