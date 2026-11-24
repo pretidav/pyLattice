@@ -35,17 +35,21 @@ def run_simulation(model, parser, logger, prefix, measurement_file='meas.json', 
     callbacks = standard + list(callbacks)
 
     start = time.perf_counter()
+    run = dict(thermalization=parser.thermalization, measure_every=parser.measure_every, callbacks=callbacks,
+               progress=parser.progress)
     if hasattr(model, 'run_mc'):
-        model.run_mc(steps=parser.steps, online_obs=True, callbacks=callbacks, progress=parser.progress)
+        model.run_mc(steps=parser.steps, online_obs=True, **run)
         history = model.history
     else:
-        history = montecarlo.run(model, parser.steps, callbacks=callbacks, progress=parser.progress)
+        history = montecarlo.run(model, parser.steps, **run)
     elapsed = time.perf_counter() - start
 
     acceptance = [a for a in history.acceptance if a is not None]
+    sweeps = parser.thermalization + parser.steps
     logger.show(info_panels([('done', [
-        ('sweeps', parser.steps),
-        ('wall time', '{:.1f} s ({:.1f} sweeps/s)'.format(elapsed, parser.steps / elapsed if elapsed else 0.0)),
+        ('sweeps', '{} ({} of thermalization, {} measured)'.format(sweeps, parser.thermalization, parser.steps)
+         if parser.thermalization else sweeps),
+        ('wall time', '{:.1f} s ({:.1f} sweeps/s)'.format(elapsed, sweeps / elapsed if elapsed else 0.0)),
         ('acceptance', '{:.3f}'.format(sum(acceptance) / len(acceptance)) if acceptance else 'n/a'),
         ('measurements', '{}  (print and plot them with: python -m pylattice.utils.plot_meas {})'.format(
             measurement_file, measurement_file)),

@@ -56,6 +56,18 @@ def test_a_run_gives_the_measurement_file_the_run_log_lines_and_the_summary(tmp_
     assert 'MONTE CARLO' not in shown and sorted(os.listdir('.')) == ['meas.json', 'run.log']        # no bar, no checkpoints
 
 
+def test_thermalization_and_measure_every_reach_the_run_and_the_summary(tmp_path, monkeypatch):
+    model, history, term, parser = run(tmp_path, monkeypatch, '--steps=6', '--thermalization=4', '--measure-every=2',
+                                       '--runlog-every=5')
+    assert model.sweeps == 10                                                           # 4 not measured + 6 measured
+    assert history.sweeps == [0, 2, 4, 6] and history['x'][0] == 4.0                    # the first measurement: after the 4
+    records = json.load(open('meas.json'))['measurements']
+    assert [r['sweep'] for r in records] == [0, 2, 4, 6]
+    shown = plain(term)
+    assert [l.split()[0] for l in shown.splitlines() if l.startswith('step=')] == ['step=5', 'step=10']   # all the sweeps count
+    assert '10 (4 of thermalization, 6 measured)' in shown
+
+
 def test_no_log_lines_without_runlog_every_and_no_file_with_logfile_off(tmp_path, monkeypatch):
     model, history, term, parser = run(tmp_path, monkeypatch, '--steps=6', '--runlog-every=0', '--logfile=off', '--progress')
     assert 'step=' not in plain(term)

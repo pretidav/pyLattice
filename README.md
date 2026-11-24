@@ -70,6 +70,28 @@ mpiexec -np 4 python -m pylattice.theories.spin.ising --grid=20x20 --mpigrid=2x2
 the system and of the run (OS, architecture, MPI, `h5py`, lattice, parameters), shows a progress bar, and writes
 `meas.json`. It plots nothing: plotting is done offline, see [below](#working-with-the-results).
 
+The SU(2) gauge theory with the Wilson action runs the same way (a 4-dimensional lattice by default):
+
+~~~
+mpiexec -np 4 python -m pylattice.theories.gauge.su2 --grid=4x4x8x8 --mpigrid=2x2x1x1 --beta=2.3 --steps=500 \
+    --thermalization=100 --algorithm=heatbath --overrelax=4
+~~~
+
+Besides the common options (including `--thermalization` and `--measure-every`) it has:
+
+| option | default | meaning |
+|---|---|---|
+| `--algorithm` | `metropolis` | the update of every sweep: `metropolis` (the acceptance is measured) or the exact `heatbath` (always accepted, decorrelates much faster) |
+| `--overrelax N` | `0` | overrelaxation sweeps after it, in every sweep: they leave the action exactly unchanged and move the links far (3 to 5 is usual with the heat bath) |
+| `--eps`, `--hits` | `0.4`, `1` | Metropolis only: size of the proposal in (0, 1], chosen for an acceptance of 0.4 to 0.6 (about 0.4 at beta = 2.3, 0.12 at beta = 20), and proposals per link and visit |
+| `--init cold\|hot` | `cold` | the starting configuration (unless `--start-from`) |
+
+During the run it measures only the cheap observables: `plaq_re` and `plaq_im` (the average plaquette; the imaginary
+part is zero up to rounding and checks the links), `action` per site, and the acceptance. The expensive ones are
+measured offline on the stored configurations (`--checkpoint-every`), see
+[Measure stored configurations](#measure-stored-configurations). The first measurement of `meas.json` is the
+configuration after the thermalization.
+
 ---
 
 ## Running a simulation
@@ -168,6 +190,21 @@ output is a `meas.json` in the same format (sweep = the step of the checkpoint, 
 `m2`, `e` and `e2` per site, in the order of the steps. The rank layout may differ from the run's. Other theories
 plug in with their own `measure(path)` through `pylattice.core.measure.measure_files`.
 
+For SU(2) the expensive observables are measured this way:
+
+~~~
+mpiexec -np 4 python -m pylattice.theories.gauge.su2_meas checkpoints/su2_*.hdf5 --beta=2.3 --mpigrid=2x2x1x1 --max-loop=3
+~~~
+
+`--beta` is the coupling of the run (the action depends on it and the checkpoints do not store it). Each file is checked
+to be an SU(2) configuration of the right lattice. The output has, per configuration: `plaq_re`, `plaq_im`, `action`;
+`plaq_s` and `plaq_t` (the plaquette in the spatial planes and in the planes with the last direction, the time);
+`polyakov` and `polyakov_abs` (the Polyakov loop along the last direction, so put the time last in `--grid`); the Wilson
+loops `W<R><T>` (R x T, R <= T <= `--max-loop`, averaged over the sites and orientations; `W11` is the plaquette); and
+the Creutz ratios `creutz22`, `creutz33`, ... = -ln(W(R,R) W(R-1,R-1) / W(R-1,R)^2), nan for a configuration where
+the argument is not positive. Average the loops over the configurations first (`plot_meas` prints the mean, error and
+autocorrelation time of each) and take the ratio of the averages: that is the usual estimate.
+
 ---
 
 ## Repository layout
@@ -185,7 +222,9 @@ pylattice/
                      su.py        SU(N) from its SU(2) subgroups (Cabibbo-Marinari)
   theories/
     spin/          variables on sites: Ising (simulation and offline measurements)
-    gauge/         variables on links: SU(2) gauge field
+    gauge/         variables on links: SU(2) gauge field (sun.py: the field, its plaquettes, staples, action;
+                   su2.py: the Wilson-action theory with Metropolis / heat bath / overrelaxation sweeps;
+                   su2_meas.py: the loops and Creutz ratios, measured on stored configurations)
   utils/           plot_meas: print and plot a meas.json
 tests/             mirrors the package (tests/core, tests/theories, tests/utils)
 benchmarks/        performance evaluation, parallel HDF5 demo
@@ -234,6 +273,8 @@ mpiexec -n 2 python tests/core/test_grid_mpi.py                # needs exactly 2
 ## Performance
 
 Strong scaling at fixed global size, best of 3 runs. "Naive" is a plain per-site `np.dot` loop without MPI.
+The lattice classes act on all the sites at once (numpy arrays), which is what the "vectorized" curve shows; the
+"loops" curves are the same operation as it was written before, one site at a time.
 
 ~~~
 Grid 40x40x40x40
@@ -246,6 +287,18 @@ MatrixField2 = LatticeRealMatrix(lattice=Grid,N=2)
   (4 cores, 2 threads per core)
 @ Apple M4 Pro (10 performance + 4 efficiency cores)
 ~~~
+
+On the Apple M4 Pro, vectorized (seconds, and speedup over one process):
+
+| processes | 1 | 2 | 4 | 8 | 10 |
+|---|---|---|---|---|---|
+| time | 0.129 | 0.066 | 0.035 | 0.029 | 0.022 |
+| speedup | 1.0 | 2.0 | 3.7 | 4.4 | 5.8 |
+
+One vectorized process is about 11 times faster than the loops, and 9 times faster than the naive loop (1.18 s). The
+scaling is near ideal up to 4 processes; after that each rank has too little work (about 0.03 s) and the fixed
+costs of the call and of the reduction show. Threads do not help: the arithmetic is numpy ufuncs and batched 2x2
+products, which do not use a threaded BLAS, so scale with MPI ranks (`OMP_NUM_THREADS` has no effect).
 
 ~~~
 mpiexec -np 4 python benchmarks/performance_evaluation.py --mpigrid=2x2x1x1

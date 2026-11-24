@@ -27,7 +27,8 @@ def test_defaults():
     assert P.debug is False and P.logfile == 'run.log' and P.progress is False
     assert type(P.steps) is int and type(P.beta) is float and type(P.seed) is int
     assert P.checkpoint_every == 0 and P.runlog_every == 5                  # checkpoints off; about 20 log lines per run
-    assert P.args == {'grid': [4, 4], 'mpigrid': [1, 2], 'steps': 100, 'beta': 0.5, 'seed': 0,
+    assert (P.thermalization, P.measure_every) == (0, 1)
+    assert P.args == {'grid': [4, 4], 'mpigrid': [1, 2], 'steps': 100, 'thermalization': 0, 'measure_every': 1, 'beta': 0.5, 'seed': 0,
                       'checkpoint_every': 0, 'runlog_every': 5, 'start_from': None, 'debug': False, 'logfile': 'run.log',
                       'progress': False}
 
@@ -79,6 +80,25 @@ def test_invalid_values_give_a_clean_error(argv, option, capsys):
     assert exc.value.code == 2                           # argparse usage error, not a traceback
     err = capsys.readouterr().err
     assert option in err and 'Traceback' not in err
+
+
+def test_thermalization_and_measurement_interval():
+    P = Parser(['--thermalization=50', '--measure-every', '5', '--steps=200'])
+    assert (P.thermalization, P.measure_every, P.steps) == (50, 5, 200)
+    assert type(P.thermalization) is int and type(P.measure_every) is int
+    assert Parser(['--steps=100', '--thermalization=100']).runlog_every == 10          # about 20 lines over all the sweeps
+    assert Parser(['--steps=0', '--thermalization=40']).runlog_every == 2
+    for argv, option in ((['--thermalization=-1'], '--thermalization'), (['--thermalization=x'], '--thermalization'),
+                         (['--measure-every=0'], '--measure-every'), (['--measure-every=2.5'], '--measure-every')):
+        with pytest.raises(SystemExit) as exc:
+            Parser(argv)
+        assert exc.value.code == 2
+
+
+def test_the_banner_lists_the_thermalization_and_the_measurement_interval():
+    from pylattice.core.cli import run_info
+    rows = dict(dict(run_info(Parser(['--grid=4x4', '--mpigrid=1x1', '--thermalization=7', '--measure-every=3'])))['run'])
+    assert rows['thermalization'] == 7 and rows['measure every'] == 3
 
 
 def test_the_run_log_interval_defaults_to_about_twenty_lines_and_the_logfile_can_be_switched_off():
@@ -134,9 +154,8 @@ def test_ising_model_command_line_is_wired():
     r = subprocess.run([sys.executable, '-m', 'pylattice.theories.spin.ising', '--help'], cwd=ROOT, capture_output=True,
                        text=True, env=dict(os.environ, PYTHONPATH=ROOT), timeout=120)
     assert r.returncode == 0 and '--beta' in r.stdout and 'inverse temperature' in r.stdout
-    r = subprocess.run([sys.executable, '-m', 'pylattice.theories.spin.ising', '--grid=4x4', '--mpigrid=2x2x2'], cwd=ROOT,
-                       capture_output=True, text=True, env=dict(os.environ, PYTHONPATH=ROOT), timeout=120)
-    assert r.returncode == 2 and '--grid has 2 dimensions but --mpigrid has 3' in r.stderr
+    # (a bad command line stopping with status 2 is tested in process: test_grid_and_mpigrid_must_have_the_same_dimensions
+    # and test_ising.test_command_line_driver; one launch of the module is enough to check the entry point)
 
 
 # =========================================================================

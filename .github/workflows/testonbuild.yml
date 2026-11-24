@@ -36,6 +36,14 @@ jobs:
         run:  pytest tests/core/test_discrete.py tests/core/test_su2.py tests/core/test_su.py tests/core/test_group_interface.py
       - name: Run test SU(2) gauge field
         run:  pytest tests/theories/gauge/test_gauge_sun.py
+      - name: Run test SU(2) gauge theory (Metropolis sweep)
+        run:  pytest tests/theories/gauge/test_gauge_su2.py
+      - name: Run test SU(2) offline measurements (loops)
+        run:  pytest tests/theories/gauge/test_gauge_su2_meas.py
+      - name: Run test SU(2) offline measurements in parallel
+        run:  mpiexec -n 2 python tests/theories/gauge/test_gauge_su2_meas.py
+      - name: Run test SU(2) gauge theory in parallel
+        run:  mpiexec -n 2 python tests/theories/gauge/test_gauge_su2.py
       - name: Run test SU(2) gauge field in parallel
         run:  mpiexec -n 2 python tests/theories/gauge/test_gauge_sun_mpi.py
       - name: Run test random streams

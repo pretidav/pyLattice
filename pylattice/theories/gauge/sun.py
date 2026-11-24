@@ -4,8 +4,9 @@ representation of Creutz, the heat bath of a link, the embedding in SU(N)).
 
 All the updates act on the whole local lattice at once, and draw from a numpy Generator: the one given to
 the field (default: the independent stream of this rank, CartesianComm.rng(0)) or the one passed to the
-method. Staple, Plaq and Action are not implemented yet, so there is no Monte Carlo sweep with an
-acceptance step or a heat bath yet.
+method. Staples, plaquettes, Wilson loops, Polyakov loops and the Wilson action are computed with the lattice
+operations (shifts, products, traces, reductions), so they are the same however the lattice is split over the ranks;
+the sweeps that use them are in pylattice.theories.gauge.su2.
 """
 import numpy as np
 
@@ -107,19 +108,73 @@ class SU2Field(LatticeVectorComplexMatrix):
             staple = upper + lower if staple is None else staple + upper + lower
         return staple
 
-    def _trace_sum(self, pairs):
-        """sum over all the sites of the whole lattice and the given (mu, nu) of tr P_{mu nu}, and the number of terms"""
-        total = sum((self.Plaquette_field(mu, nu).trace() for mu, nu in pairs[1:]), self.Plaquette_field(*pairs[0]).trace())
+    def _extent(self, mu):
+        """number of sites of the whole lattice along mu"""
+        return int(self.grid[mu] * self.cartesiancomm.mpigrid[mu])
+
+    def line(self, mu, length):
+        """The product of `length` links along mu from every site, U_mu(x) U_mu(x+mu) ... U_mu(x+(length-1)mu) (a
+        LatticeComplexMatrix)"""
+        self._check_directions(mu)
+        if length < 1:
+            raise ValueError("the length of a line must be at least 1, got {}".format(length))
+        moved = out = self.peek_index(mu)
+        for _ in range(length - 1):
+            moved = moved.shift_forward(mu)
+            out = out * moved
+        return out
+
+    @staticmethod
+    def _shifted(lattice, mu, steps):
+        for _ in range(steps):
+            lattice = lattice.shift_forward(mu)
+        return lattice
+
+    def loop_field(self, mu, nu, R, T):
+        """The Wilson loop of R sites along mu and T along nu, starting at every site:
+            line(mu, R)(x) line(nu, T)(x + R mu) line(mu, R)(x + T nu)^+ line(nu, T)(x)^+      (R = T = 1: a plaquette)
+        a LatticeComplexMatrix. R and T cannot exceed the extent of the whole lattice along mu and nu."""
+        self._check_directions(mu, nu)
+        if mu == nu:
+            raise ValueError("a loop needs two different directions")
+        if not (1 <= R <= self._extent(mu) and 1 <= T <= self._extent(nu)):
+            raise ValueError("a {}x{} loop does not fit in the lattice ({} along {}, {} along {})".format(
+                R, T, self._extent(mu), mu, self._extent(nu), nu))
+        a, b = self.line(mu, R), self.line(nu, T)
+        return a * self._shifted(b, mu, R) * self._shifted(a, nu, T).adj() * b.adj()
+
+    def _trace_sum(self, pairs, R=1, T=1):
+        """sum over all the sites of the whole lattice and the given (mu, nu) of tr of the R x T loop, and the number
+        of terms"""
+        fields = [self.Plaquette_field(mu, nu) if R == T == 1 else self.loop_field(mu, nu, R, T) for mu, nu in pairs]
+        total = sum((f.trace() for f in fields[1:]), fields[0].trace())
         sites = int(np.prod(self.grid) * np.prod(self.cartesiancomm.mpigrid))
         return complex(total.reducesum()), sites * len(pairs)
 
-    def Plaq(self):
-        """The plaquette (1/N) tr P averaged over all the sites and all the ordered pairs mu != nu of the whole lattice:
-        a complex number (1 for a cold field). P_{nu mu} = P_{mu nu}^+, so the imaginary part vanishes up to
-        rounding: it is a check of the links and the shifts."""
+    def _ordered_pairs(self):
+        return [(mu, nu) for mu in range(self.Nd) for nu in range(self.Nd) if mu != nu]
+
+    def Plaq(self, pairs=None):
+        """The plaquette (1/N) tr P averaged over all the sites of the whole lattice and over `pairs`, the ordered pairs
+        (mu, nu) of directions to use (default: all the ordered pairs mu != nu): a complex number (1 for a cold
+        field). P_{nu mu} = P_{mu nu}^+, so with both orders the imaginary part vanishes up to rounding: it is a check
+        of the links and the shifts. With pairs one can separate, e.g., the spatial plaquettes from the temporal ones."""
         self._check_directions()
-        total, count = self._trace_sum([(mu, nu) for mu in range(self.Nd) for nu in range(self.Nd) if mu != nu])
+        total, count = self._trace_sum(self._ordered_pairs() if pairs is None else list(pairs))
         return total / (self.N * count)
+
+    def Wilson(self, R, T):
+        """The Wilson loop (1/N) tr of the R x T loops, averaged over all the sites of the whole lattice and all the
+        ordered pairs mu != nu (so R x T and T x R together): a complex number whose imaginary part is rounding."""
+        self._check_directions()
+        total, count = self._trace_sum(self._ordered_pairs(), R, T)
+        return total / (self.N * count)
+
+    def Polyakov(self, mu):
+        """The Polyakov loop (1/N) tr of the product of the links along the whole extent of direction mu (periodic),
+        averaged over the sites: the average of its value on the lattice of the other directions (a complex number)."""
+        loop = self.line(mu, self._extent(mu))
+        return complex(loop.trace().reducesum()) / (self.N * int(np.prod(self.grid) * np.prod(self.cartesiancomm.mpigrid)))
 
     def Action(self, beta):
         """the Wilson action S = beta sum_{x, mu<nu} (1 - (1/N) Re tr P_{mu nu}(x)) of the whole lattice

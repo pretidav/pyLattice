@@ -46,6 +46,16 @@ def _every(text):
     return every
 
 
+def _positive(text):
+    try:
+        n = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError("'{}' is not an integer".format(text))
+    if n < 1:
+        raise argparse.ArgumentTypeError("this must be at least 1, got {}".format(n))
+    return n
+
+
 def _beta(text):
     try:
         beta = float(text)
@@ -67,7 +77,11 @@ def _seed(text):
 
 
 class Parser():
-    """Command line of the simulations. `argv` is a list of arguments (default: sys.argv[1:])."""
+    """Command line of the simulations. `argv` is a list of arguments (default: sys.argv[1:]).
+
+    A theory with options of its own subclasses it: add_options(parser) adds them to the argparse parser (and may
+    change the defaults of the common ones with parser.set_defaults), extra_info() lists them, as [(name, value)], in
+    the 'run' box of the banner. Their values are in self.args."""
 
     def __init__(self, argv=None):
         self.args = self.parser(argv)
@@ -79,6 +93,8 @@ class Parser():
         self.progress = self.args['progress']
         self.beta = self.args['beta']
         self.steps = self.args['steps']
+        self.thermalization = self.args['thermalization']
+        self.measure_every = self.args['measure_every']
         self.checkpoint_every = self.args['checkpoint_every']
         self.runlog_every = self.args['runlog_every']
         self.start_from = self.args['start_from']
@@ -93,7 +109,14 @@ class Parser():
         parser.add_argument('--mpigrid', type=self._lattice_arg, default='1x2',
                             help='number of MPI ranks along each direction, AxBx... '
                                  '(run with mpiexec -np <product of the sizes>)')
-        parser.add_argument('--steps', type=_steps, default=100, help='number of Monte Carlo steps')
+        parser.add_argument('--steps', type=_steps, default=100,
+                            help='number of Monte Carlo steps (sweeps) that are measured, after the thermalization')
+        parser.add_argument('--thermalization', type=_every, default=0, metavar='N',
+                            help='sweeps made first and not measured, to reach equilibrium (they count in the '
+                                 'sweeps of the run log and of the checkpoints)')
+        parser.add_argument('--measure-every', type=_positive, default=1, metavar='N',
+                            help='measure the observables every N sweeps (the first measurement is the '
+                                 'configuration after the thermalization)')
         parser.add_argument('--beta', type=_beta, default=0.5, help='inverse temperature')
         parser.add_argument('--seed', type=_seed, default=0, help='seed of the random number generators')
         parser.add_argument('--checkpoint-every', type=_every, default=0, metavar='N',
@@ -113,9 +136,10 @@ class Parser():
                                  "to if it exists ('off': no file)")
         parser.add_argument('--progress', action='store_true',
                             help='also draw a progress bar (rank 0)')
+        self.add_options(parser)
         args = vars(parser.parse_args(argv))
         if args['runlog_every'] is None:
-            args['runlog_every'] = max(1, args['steps'] // 20) if args['steps'] else 0
+            args['runlog_every'] = max(1, (args['steps'] + args['thermalization']) // 20) if args['steps'] + args['thermalization'] else 0
         if args['logfile'].lower() in ('off', 'none', ''):
             args['logfile'] = None
         if args['start_from'] is not None and not os.path.isfile(args['start_from']):
@@ -124,6 +148,13 @@ class Parser():
             parser.error('--grid has {} dimensions but --mpigrid has {}'.format(
                 len(args['grid']), len(args['mpigrid'])))
         return args
+
+    def add_options(self, parser):
+        """the options of a theory, added to the argparse `parser` (none here)"""
+
+    def extra_info(self):
+        """the options of a theory as [(name, value), ...] for the banner (none here)"""
+        return []
 
     def parse_latt(self, par):
         """'2x3x4' -> [2, 3, 4]. Raises ValueError unless every size is an integer >= 1."""
@@ -311,6 +342,8 @@ def run_info(parser=None, comm=None, argv=None):
         sections.append(('run', [
             ('beta', parser.beta),
             ('steps', parser.steps),
+            ('thermalization', parser.thermalization),
+            ('measure every', parser.measure_every),
             ('seed', '{} (one independent stream per rank)'.format(parser.seed)),
             ('start from', parser.start_from or 'random configuration (hot start)'),
             ('checkpoint every', parser.checkpoint_every or 'off'),
@@ -318,7 +351,7 @@ def run_info(parser=None, comm=None, argv=None):
             ('debug', parser.debug),
             ('log file', parser.logfile or 'off'),
             ('measurements', 'meas.json'),
-        ]))
+        ] + list(parser.extra_info())))
     return sections
 
 
