@@ -17,7 +17,7 @@ SU(N) (SU(2) included) and SO(N), with heat bath, Metropolis and overrelaxation 
 
 **Contents:** [Installation](#installation) · [Quick start](#quick-start) · [Running a simulation](#running-a-simulation) ·
 [Working with the results](#working-with-the-results) · [Repository layout](#repository-layout) · [Tests](#tests) ·
-[Performance](#performance) · [Citation](#citation)
+[Performance](#performance) · [Validation](#validation) · [Citation](#citation)
 
 ---
 
@@ -373,6 +373,27 @@ mpiexec -n 4 python benchmarks/hdf5_demo.py
 h5dump -n parallel_test.hdf5          # structure of the file
 h5dump -D /test parallel_test.hdf5    # the data
 ~~~
+
+---
+
+## Validation
+
+The average plaquette (1/N) Re tr U_p of the Wilson action, S = β Σ (1 − (1/N) Re tr U_p) with β = 2N/g², is compared with the
+published values of Athenodorou and Teper, *SU(N) gauge theories in 3+1 dimensions: glueball spectrum, string tensions and topology*,
+JHEP 12 (2021) 082, [arXiv:2106.00364](https://arxiv.org/abs/2106.00364) (Tables 1-4 of its appendix). It is the observable `plaq_re`
+of this code, with the same β convention. More in
+the [documentation](docs/notes.pdf).
+
+| N | β | lattice (paper) | paper | lattice (this work) | this work |
+|---|---|---|---|---|---|
+| 2 | 2.60 | 30⁴ | 0.6700089(5) | 8⁴ | 0.670096(88) |
+| 3 | 5.8941 | 14³×16 | 0.5810697(18) | 12⁴ | 0.581053(72) |
+| 4 | 10.85 | 14³×20 | 0.5664268(15) | 12⁴ | 0.566385(47) |
+| 5 | 17.43 | 14³×20 | 0.5685281(10) | 12⁴ | 0.568564(35) |
+
+![Average plaquette of the paper and of this code as a function of β](docs/plaquette_vs_beta.png)
+
+![Plaquette along the Monte Carlo for each N; the band is the value of the paper (mean ± error)](docs/plaquette_history.png)
 
 ---
 

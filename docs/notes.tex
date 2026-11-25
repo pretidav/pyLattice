@@ -6,6 +6,7 @@
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
 \usepackage{booktabs}
+\usepackage{longtable}
 \usepackage{enumitem}
 \usepackage{xcolor}
 \usepackage{listings}
@@ -106,6 +107,7 @@ The code is meant for research on lattice theories. Its guiding idea is a strict
         for any gauge group (\S\ref{sec:gauge}).
   \item Theories (\S\ref{sec:theories}): the Ising model with Metropolis; $SU(N)$ and $SO(N)$ gauge theories with the
         Cabibbo--Marinari heat bath, Metropolis and overrelaxation updates.
+  \item Validation: the plaquette of the Wilson action reproduces the values of the literature (\S\ref{sec:validation}).
   \item Tests, including MPI tests on several rank layouts, and continuous integration split into path-filtered chunks
         (\S\ref{sec:tests}).
 \end{itemize}
@@ -736,6 +738,53 @@ action, over a Metropolis sweep the action changes by the sum of the accepted ch
 For $SO(2)$ in $D=2$ the average plaquette in the infinite-statistics limit is $\langle\cos\theta_P\rangle=I_1(\beta)/I_0(\beta)$, a benchmark for a real run.
 
 % ====================================================================================================
+\section{Validation against the literature}
+\label{sec:validation}
+
+Besides the exact identities of the tests (\S\ref{sec:tests}), the gauge theories are validated by reproducing published Monte Carlo results. The reference is the
+study of Athenodorou and Teper, \emph{$SU(N)$ gauge theories in 3+1 dimensions: glueball spectrum, string tensions and topology}, JHEP 12 (2021) 082
+\cite{AT21} (arXiv:2106.00364), which simulates $SU(N)$ with $2\le N\le12$ with the standard Wilson plaquette action, the same as (\ref{eq:wilson}):
+$S=\beta\sum_p\big(1-\tfrac1N\Re\tr U_p\big)$ with $\beta=2N/g^2_L$. The tables of the paper list, for each $\beta$ and lattice, the average plaquette
+$\langle\tfrac1N\Re\tr U_p\rangle$ (averaged over all the plaquettes), which is the observable \code{plaq_re} of the code, with the same $\beta$ convention; no conversion is needed.
+
+\subsection{Average plaquette}
+Table~\ref{tab:plaq} gives, for $N=2,\dots,5$ and one value of $\beta$ per $N$, the average plaquette of the paper (hypercubic lattices are written $L^4$, the others
+$l^3\times l_t$) and the value of this code on the lattice indicated. The mean of a run is that of its measurements after the thermalization, and the error is
+that of the code (\S\ref{sec:stats}, batch means or $\Gamma$-method).
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}rrllll@{}}
+\toprule
+$N$ & $\beta$ & lattice (paper) & paper \cite{AT21} & lattice (this work) & this work \\
+\midrule
+2 & 2.60   & $30^4$         & 0.6700089(5)  & $8^4$  & 0.670096(88) \\
+3 & 5.8941 & $14^3\times16$ & 0.5810697(18) & $12^4$ & 0.581053(72) \\
+4 & 10.85  & $14^3\times20$ & 0.5664268(15) & $12^4$ & 0.566385(47) \\
+5 & 17.43  & $14^3\times20$ & 0.5685281(10) & $12^4$ & 0.568564(35) \\
+\bottomrule
+\end{tabular}
+\caption{Average plaquette $\langle\frac1N\Re\tr U_p\rangle$ of the Wilson action: values of Athenodorou and Teper \cite{AT21} (Tables 1--4 of the appendix) and of
+this code (\code{plaq_re}).}\label{tab:plaq}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.75\textwidth]{plaquette_vs_beta.png}
+\caption{Average plaquette of the paper \cite{AT21} and of this code at the $\beta$ of Table~\ref{tab:plaq}, as a function of $\beta$ (the error bars of the paper are smaller than the markers).}\label{fig:plaqbeta}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\textwidth]{plaquette_history.png}
+\caption{Plaquette along the Monte Carlo of this code, for each $N$ of Table~\ref{tab:plaq}. The band is the value of the paper \cite{AT21}, centred on its mean with
+the width of its error.}\label{fig:plaqhist}
+\end{figure}
+
+\subsection{$SO(N)$}
+The same comparison for the $SO(N)$ theories (same action and $\beta=2N/g^2$) will be added to this section, with the run parameters of each entry.
+
+% ====================================================================================================
 \section{Writing a new theory}
 \label{sec:newtheory}
 
@@ -818,6 +867,7 @@ started by hand (\code{workflow_dispatch}); there is no schedule. \code{tests/ut
 \bibitem{BLT13} F.~Bursa, R.~Lau, M.~Teper, \emph{SO(2N) and SU(N) gauge theories in 2+1 dimensions}, JHEP 05 (2013) 025, arXiv:1208.4547.
 \bibitem{ALT16} A.~Athenodorou, R.~Lau, M.~Teper, \emph{On the weak N-dependence of SO(N) and SU(N) gauge theories in 2+1 dimensions}, JHEP 03 (2016) 072, arXiv:1510.07841.
 \bibitem{LT17} R.~Lau, M.~Teper, \emph{SO(N) gauge theories in 2+1 dimensions}, JHEP 10 (2017) 022, arXiv:1701.06941.
+\bibitem{AT21} A.~Athenodorou, M.~Teper, \emph{$SU(N)$ gauge theories in 3+1 dimensions: glueball spectrum, string tensions and topology}, JHEP 12 (2021) 082, arXiv:2106.00364.
 \bibitem{dFJ03} P.~de Forcrand, O.~Jahn, \emph{Comparison of SO(3) and SU(2) lattice gauge theory}, Nucl.\ Phys.\ B651 (2003) 125, arXiv:hep-lat/0211004.
 
 \end{thebibliography}
