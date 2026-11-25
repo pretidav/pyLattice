@@ -1,4 +1,4 @@
-[![Tests core](https://github.com/pretidav/pyLattice/actions/workflows/tests-core.yml/badge.svg?branch=on)](https://github.com/pretidav/pyLattice/actions/workflows/tests-core.yml) [![Tests gauge](https://github.com/pretidav/pyLattice/actions/workflows/tests-gauge.yml/badge.svg?branch=on)](https://github.com/pretidav/pyLattice/actions/workflows/tests-gauge.yml) [![Tests spin](https://github.com/pretidav/pyLattice/actions/workflows/tests-spin.yml/badge.svg?branch=on)](https://github.com/pretidav/pyLattice/actions/workflows/tests-spin.yml)
+[![Tests core](https://github.com/pretidav/pyLattice/actions/workflows/tests-core.yml/badge.svg?branch=main)](https://github.com/pretidav/pyLattice/actions/workflows/tests-core.yml) [![Tests gauge](https://github.com/pretidav/pyLattice/actions/workflows/tests-gauge.yml/badge.svg?branch=main)](https://github.com/pretidav/pyLattice/actions/workflows/tests-gauge.yml) [![Tests spin](https://github.com/pretidav/pyLattice/actions/workflows/tests-spin.yml/badge.svg?branch=main)](https://github.com/pretidav/pyLattice/actions/workflows/tests-spin.yml)
 
 # pyLattice
 <p align="center">
