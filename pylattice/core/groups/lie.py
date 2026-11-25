@@ -1,9 +1,9 @@
-"""Lie groups: the common interface of the groups that have an algebra (SU(N), later SO(N), U(N)). On top of
+"""Lie groups: the common interface of the groups that have an algebra (SU(N), SO(N), later U(N)). On top of
 pylattice.core.groups.base it gives the algebra: its dimension and generators, the exponential map from the
 algebra to the group and its inverse, and a random element near the identity (the proposal of a Metropolis
 step). An algebra vector has shape size + (dim,), its group element is exp(i w.T).
 
-Implementations: pylattice.core.groups.su2 (SU2) and pylattice.core.groups.su (SU(N), the instances SU(3), SU(4), ...).
+Implementations: pylattice.core.groups.su2 (SU2) and pylattice.core.groups.su (SU(N), the instances SU(3), SU(4), ...), pylattice.core.groups.so (SO(N)).
 """
 from abc import abstractmethod
 
