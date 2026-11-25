@@ -782,7 +782,35 @@ the width of its error.}\label{fig:plaqhist}
 \end{figure}
 
 \subsection{$SO(N)$}
-The same comparison for the $SO(N)$ theories (same action and $\beta=2N/g^2$) will be added to this section, with the run parameters of each entry.
+The same comparison for the $SO(N)$ theories, in $2+1$ dimensions, with the average plaquette of Lau and Teper \cite{LT17} (Tables 12--16 of the appendix; same action and
+$\beta=2N/g^2$). Each $\beta$ is above the interval of the bulk transition given in that paper (Table~1 of \cite{LT17}: $SO(4)$ $[9.1,10.2]$,
+$SO(6)$ $[18.0,21.3]$, $SO(8)$ $[31,35]$). The paper quotes the plaquette without error.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}rrllll@{}}
+\toprule
+$N$ & $\beta$ & lattice (paper) & paper \cite{LT17} & lattice (this work) & this work \\
+\midrule
+4 & 11.0 & $20^2\times28$ & 0.80135 & $20^2\times28$ & 0.801341(31) \\
+6 & 28.0 & $20^2\times28$ & 0.80677 & $20^2\times28$ & 0.806442(34) \\
+8 & 51.0 & $16^2\times24$ & 0.80206 & $16^2\times24$ & 0.801619(39) \\
+\bottomrule
+\end{tabular}
+\caption{Average plaquette $\langle\frac1N\tr U_p\rangle$ of the $SO(N)$ Wilson action in $2+1$ dimensions: values of Lau and Teper \cite{LT17} and of this code.}\label{tab:plaqso}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.75\textwidth]{plaquette_vs_beta_so.png}
+\caption{Average plaquette of the paper \cite{LT17} and of this code at the $\beta$ of Table~\ref{tab:plaqso}, for $SO(N)$ in $2+1$ dimensions.}\label{fig:plaqso}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\textwidth]{plaquette_history_so.png}
+\caption{Plaquette along the Monte Carlo of this code for each $N$ of Table~\ref{tab:plaqso}; the line is the value of the paper \cite{LT17}.}\label{fig:plaqsohist}
+\end{figure}
 
 % ====================================================================================================
 \section{Writing a new theory}

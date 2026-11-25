@@ -395,6 +395,23 @@ the [documentation](docs/notes.pdf).
 
 ![Plaquette along the Monte Carlo for each N; the band is the value of the paper (mean ± error)](docs/plaquette_history.png)
 
+### SO(N)
+
+The same comparison for SO(N), in **2+1 dimensions**, with the values of Lau and Teper, *SO(N) gauge theories in 2+1 dimensions*,
+JHEP 10 (2017) 022, [arXiv:1701.06941](https://arxiv.org/abs/1701.06941) (Tables 12-16 of its appendix; same action and β = 2N/g²).
+Each β is above the bulk-transition interval of the paper (SO(4) [9.1, 10.2], SO(6) [18.0, 21.3], SO(8) [31, 35]).
+The paper quotes the plaquette without error.
+
+| N | β | lattice (paper) | paper | lattice (this work) | this work |
+|---|---|---|---|---|---|
+| 4 | 11.0 | 20²×28 | 0.80135 | 20²×28 | 0.801341(31) |
+| 6 | 28.0 | 20²×28 | 0.80677 | 20²×28 | 0.806442(34) |
+| 8 | 51.0 | 16²×24 | 0.80206 | 16²×24 | 0.801619(39) |
+
+![Average plaquette of the paper and of this code as a function of β, SO(N)](docs/plaquette_vs_beta_so.png)
+
+![Plaquette along the Monte Carlo for each SO(N); the line is the value of the paper](docs/plaquette_history_so.png)
+
 ---
 
 ## Citation
