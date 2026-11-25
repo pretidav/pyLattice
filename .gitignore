@@ -4,7 +4,6 @@ __pycache__/*
 ising.png
 docs/notes.out
 *.hdf5
-*.png
 *.log
 pylattice/utils/__pycache__/*.pyc
 pylattice/core/__pycache__/*.pyc
